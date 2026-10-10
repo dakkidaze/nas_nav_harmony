@@ -11,6 +11,10 @@
     {
       "name": "EntryAbility_label",
       "value": "NAS导航"
+    },
+    {
+      "name": "permission_write_imagevideo_reason",
+      "value": "用于将网页中的图片保存到您的相册"
     }
   ]
 }

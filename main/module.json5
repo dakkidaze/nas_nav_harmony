@@ -6,8 +6,7 @@
     "mainElement": "EntryAbility",
     "deviceTypes": [
       "phone",
-      "tablet",
-      "2in1"
+      "tablet"
     ],
     "deliveryWithInstall": true,
     "installationFree": false,
@@ -60,6 +59,16 @@
         }
       },
       {"name": "ohos.permission.GET_NETWORK_INFO"},
+      {
+        "name": "ohos.permission.WRITE_IMAGEVIDEO",
+        "reason": "$string:permission_write_imagevideo_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      }
     ],
 
   }

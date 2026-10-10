@@ -1,5 +1,5 @@
 import { webview } from '@kit.ArkWeb';
-import { promptAction, window } from '@kit.ArkUI';
+import { window } from '@kit.ArkUI';
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import {
   saveHomeUrl,
@@ -29,45 +29,62 @@ import { http, connection, socket } from '@kit.NetworkKit';
 import { fileIo as fs, ReadOptions, WriteOptions } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { BusinessError, systemDateTime } from '@kit.BasicServicesKit';
+import { AppContext } from '../model/AppContext';
 
-let context_index = getContext(this) as common.UIAbilityContext;
-let resourceDir = context_index.resourceDir
+let context_index = AppContext.ctx;
+let resourceDir = context_index?.resourceDir ?? '';
 
 const TAG = 'web-savePic';
-const context = getContext(this) as common.UIAbilityContext;
+const context = AppContext.ctx;
 /**
  * 复制本地文件到应用沙箱,并返回保存后的沙箱中的文件路径
  */
 function copyLocalPicFilesDir(rawfilePath: string, newFileName: string): string {
-  let srcFileDescriptor = context.resourceManager.getRawFdSync(rawfilePath); //这里填rawfile文件夹下的文件名（包括后缀）
-  let dstPath = context.filesDir + "/" + newFileName;
-  let dest: fs.File = fs.openSync(dstPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE)
-  let bufsize = 4096
-  let buf = new ArrayBuffer(bufsize)
-  let off = 0, len = 0, readedLen = 0
-  while (len = fs.readSync(srcFileDescriptor.fd, buf, { offset: srcFileDescriptor.offset + off, length: bufsize })) {
-    readedLen += len
-    fs.writeSync(dest.fd, buf, { offset: off, length: len })
-    off = off + len
-    if ((srcFileDescriptor.length - readedLen) < bufsize) {
-      bufsize = srcFileDescriptor.length - readedLen
+  try {
+    const ctx = AppContext.ctx;
+    if (!ctx) {
+      return '';
     }
-  }
-  fs.close(dest.fd)
+    let srcFileDescriptor = ctx.resourceManager.getRawFdSync(rawfilePath); //这里填rawfile文件夹下的文件名（包括后缀）
+    let dstPath = ctx.filesDir + "/" + newFileName;
+    let dest: fs.File = fs.openSync(dstPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE)
+    let bufsize = 4096
+    let buf = new ArrayBuffer(bufsize)
+    let off = 0, len = 0, readedLen = 0
+    while (len = fs.readSync(srcFileDescriptor.fd, buf, { offset: srcFileDescriptor.offset + off, length: bufsize })) {
+      readedLen += len
+      fs.writeSync(dest.fd, buf, { offset: off, length: len })
+      off = off + len
+      if ((srcFileDescriptor.length - readedLen) < bufsize) {
+        bufsize = srcFileDescriptor.length - readedLen
+      }
+    }
+    fs.close(dest.fd)
 
-  return dest.path;
+    return dest.path;
+  } catch (e) {
+    console.error(TAG, 'copyLocalPicFilesDir error:', JSON.stringify(e));
+    return '';
+  }
 }
 
 async function copyUrlPicToFilesDir(picUrl: string, newFileName: string): Promise<string> {
   let uri = '';
   //读取网络图片并保存到沙箱路径下
   let httpRequest = http.createHttp();
-  let data: http.HttpResponse = await (httpRequest.request(picUrl) as Promise<http.HttpResponse>);
-  if (data?.responseCode == http.ResponseCode.OK) {
-    let dstPath = context.filesDir + "/" + newFileName;
-    let dest: fs.File = fs.openSync(dstPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE)
-    let writeLen: number = fs.writeSync(dest.fd, data.result as ArrayBuffer);
-    uri = dest.path;
+  try {
+    let data: http.HttpResponse = await (httpRequest.request(picUrl) as Promise<http.HttpResponse>);
+    if (data?.responseCode == http.ResponseCode.OK) {
+      const ctx = AppContext.ctx;
+      if (ctx) {
+        let dstPath = ctx.filesDir + "/" + newFileName;
+        let dest: fs.File = fs.openSync(dstPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE)
+        let writeLen: number = fs.writeSync(dest.fd, data.result as ArrayBuffer);
+        uri = dest.path;
+      }
+    }
+  } catch (e) {
+    console.error(TAG, 'copyUrlPicToFilesDir error:', JSON.stringify(e));
   }
   return uri;
 }
@@ -160,7 +177,7 @@ struct Index {
           .onClick(async (event, result: SaveButtonOnClickResult) => {
             if (result == SaveButtonOnClickResult.SUCCESS) {
               try {
-                let context = getContext();
+                let context = this.getUIContext().getHostContext() as common.UIAbilityContext;
                 let phAccessHelper = photoAccessHelper.getPhotoAccessHelper(context);
                 let uri = '';
                 //复制图片到应用沙箱目录下，并获取uri
@@ -176,7 +193,7 @@ struct Index {
                 console.info('createAsset successfully, uri: ' + assetChangeRequest.getAsset().uri);
                 this.showMenu = false;
               } catch (err) {
-                console.error(`create asset failed with error: ${err.code}, ${err.message}`);
+                console.error(`create asset failed with error: ${(err as BusinessError).code}, ${(err as BusinessError).message}`);
               }
             } else {
               console.error('SaveButtonOnClickResult create asset failed');
@@ -212,51 +229,58 @@ struct Index {
   @State slide_num: number = 0.3;
 
   async setSystemFull(is_full: string, is_hidestatus: string, is_hidebar: string) {
-    let windowClass = await window.getLastWindow(context_index)
-    if (is_full == 'true') {
-      if (is_hidestatus == 'true') {
-        if (is_hidebar == 'true') {
-          await windowClass.setWindowLayoutFullScreen(true)
-          await windowClass.setSpecificSystemBarEnabled('status', true, true);
-          await windowClass.setSpecificSystemBarEnabled('navigationIndicator', true, true);
+    if (!AppContext.ctx) {
+      return;
+    }
+    try {
+      let windowClass = await window.getLastWindow(AppContext.ctx!)
+      if (is_full == 'true') {
+        if (is_hidestatus == 'true') {
+          if (is_hidebar == 'true') {
+            await windowClass.setWindowLayoutFullScreen(true)
+            await windowClass.setSpecificSystemBarEnabled('status', true, true);
+            await windowClass.setSpecificSystemBarEnabled('navigationIndicator', true, true);
+          } else {
+            await windowClass.setWindowLayoutFullScreen(true)
+            await windowClass.setSpecificSystemBarEnabled('status', true, true);
+            await windowClass.setSpecificSystemBarEnabled('navigationIndicator', false, true);
+          }
         } else {
-          await windowClass.setWindowLayoutFullScreen(true)
-          await windowClass.setSpecificSystemBarEnabled('status', true, true);
-          await windowClass.setSpecificSystemBarEnabled('navigationIndicator', false, true);
+          if (is_hidebar == 'true') {
+            await windowClass.setWindowLayoutFullScreen(true)
+            await windowClass.setSpecificSystemBarEnabled('status', false, true);
+            await windowClass.setSpecificSystemBarEnabled('navigationIndicator', true, true);
+          } else {
+            await windowClass.setWindowLayoutFullScreen(true)
+            await windowClass.setSpecificSystemBarEnabled('status', false, true);
+            await windowClass.setSpecificSystemBarEnabled('navigationIndicator', false, true);
+          }
         }
       } else {
-        if (is_hidebar == 'true') {
-          await windowClass.setWindowLayoutFullScreen(true)
-          await windowClass.setSpecificSystemBarEnabled('status', false, true);
-          await windowClass.setSpecificSystemBarEnabled('navigationIndicator', true, true);
+        if (is_hidestatus == 'true') {
+          if (is_hidebar == 'true') {
+            await windowClass.setWindowLayoutFullScreen(false)
+            await windowClass.setSpecificSystemBarEnabled('status', true, true);
+            await windowClass.setSpecificSystemBarEnabled('navigationIndicator', true, true);
+          } else {
+            await windowClass.setWindowLayoutFullScreen(false)
+            await windowClass.setSpecificSystemBarEnabled('status', true, true);
+            await windowClass.setSpecificSystemBarEnabled('navigationIndicator', false, true);
+          }
         } else {
-          await windowClass.setWindowLayoutFullScreen(true)
-          await windowClass.setSpecificSystemBarEnabled('status', false, true);
-          await windowClass.setSpecificSystemBarEnabled('navigationIndicator', false, true);
+          if (is_hidebar == 'true') {
+            await windowClass.setWindowLayoutFullScreen(true)
+            await windowClass.setSpecificSystemBarEnabled('status', false, true);
+            await windowClass.setSpecificSystemBarEnabled('navigationIndicator', true, true);
+          } else {
+            await windowClass.setWindowLayoutFullScreen(false)
+            await windowClass.setSpecificSystemBarEnabled('status', false, true);
+            await windowClass.setSpecificSystemBarEnabled('navigationIndicator', false, true);
+          }
         }
       }
-    } else {
-      if (is_hidestatus == 'true') {
-        if (is_hidebar == 'true') {
-          await windowClass.setWindowLayoutFullScreen(false)
-          await windowClass.setSpecificSystemBarEnabled('status', true, true);
-          await windowClass.setSpecificSystemBarEnabled('navigationIndicator', true, true);
-        } else {
-          await windowClass.setWindowLayoutFullScreen(false)
-          await windowClass.setSpecificSystemBarEnabled('status', true, true);
-          await windowClass.setSpecificSystemBarEnabled('navigationIndicator', false, true);
-        }
-      } else {
-        if (is_hidebar == 'true') {
-          await windowClass.setWindowLayoutFullScreen(true)
-          await windowClass.setSpecificSystemBarEnabled('status', false, true);
-          await windowClass.setSpecificSystemBarEnabled('navigationIndicator', true, true);
-        } else {
-          await windowClass.setWindowLayoutFullScreen(false)
-          await windowClass.setSpecificSystemBarEnabled('status', false, true);
-          await windowClass.setSpecificSystemBarEnabled('navigationIndicator', false, true);
-        }
-      }
+    } catch (e) {
+      console.error('setSystemFull error:', JSON.stringify(e));
     }
   }
 
@@ -264,24 +288,31 @@ struct Index {
   applyThemeMode(theme: string) {
     this.themeMode = theme;
     saveThemeMode(theme);
-    const appCtx = (globalThis.abilityContext as common.UIAbilityContext)?.getApplicationContext() ||
-                   context_index.getApplicationContext();
-    if (theme === 'light') {
-      this.isDarkActive = false;
-      appCtx?.setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
-    } else if (theme === 'dark') {
-      this.isDarkActive = true;
-      appCtx?.setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
-    } else {
-      // system
-      appCtx?.setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
-      // 跟随当前系统配置判断是否暗色
-      const currentConfig = appCtx?.getRunningProcessInformation?.();
-      this.isDarkActive = true;
+    const appCtx = AppContext.ctx?.getApplicationContext();
+    try {
+      if (theme === 'light') {
+        this.isDarkActive = false;
+        appCtx?.setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
+      } else if (theme === 'dark') {
+        this.isDarkActive = true;
+        appCtx?.setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
+      } else {
+        // system
+        appCtx?.setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+        // 跟随当前系统配置判断是否暗色
+        const currentConfig = appCtx?.getRunningProcessInformation?.();
+        this.isDarkActive = true;
+      }
+    } catch (e) {
+      console.error('applyThemeMode error:', JSON.stringify(e));
     }
   }
 
   async aboutToAppear() {
+    AppContext.uiContext = this.getUIContext();
+    if (!this.saved_home_url && AppContext.ctx) {
+      this.saved_home_url = AppContext.ctx.resourceDir + "/nasnav.html";
+    }
     EmitterUtil.on<number>('affffa', (event) => {
       if (event?.data === 1) {
         this.downloadWebLoading.open()
@@ -381,7 +412,7 @@ struct Index {
           Button("清除缓存")
             .onClick(() => {
               this.controller.removeCache(true)
-              promptAction.showToast({ message: '缓存已清除' });
+              this.getUIContext().getPromptAction().showToast({ message: '缓存已清除' });
             })
             .height(34)
             .width("28%")
@@ -431,7 +462,7 @@ struct Index {
               .onContextMenuShow((event) => {
                   this.result = event.result
                   this.imgUrl = event.param.getSourceUrl();
-                  let hitValue = this.controller.getHitTestValue()
+                  let hitValue = this.controller.getLastHitTest()
                   let img64 = hitValue.extra
                 if(this.imgUrl==''&&img64!=''){
                   this.imgUrl = img64
@@ -967,10 +998,15 @@ struct Index {
   }
 
   onBackPress() {
-    if (this.controller.accessStep(-1)) {
-      this.controller.backward();
-      return true
-    } else {
+    try {
+      if (this.controller.accessStep(-1)) {
+        this.controller.backward();
+        return true
+      } else {
+        return false
+      }
+    } catch (e) {
+      console.error('onBackPress error:', JSON.stringify(e));
       return false
     }
   }
@@ -983,7 +1019,7 @@ struct Index {
       if (!this.is_home) {
         this.refreshWeb();
         this.is_home = false;
-        promptAction.showToast({ message: '刷新成功' });
+        this.getUIContext().getPromptAction().showToast({ message: '刷新成功' });
       }
     }, 1000);
   }
@@ -993,7 +1029,11 @@ struct Index {
       return;
     }
     this.isRefreshing = true;
-    this.controller.refresh();
+    try {
+      this.controller.refresh();
+    } catch (e) {
+      console.error('refreshWeb error:', JSON.stringify(e));
+    }
     setTimeout(() => {
       this.isRefreshing = false;
     }, 1000);
@@ -1172,7 +1212,7 @@ struct Index {
         }
       } else {
         let famLabel = this.ipResolveMode === 'v6' ? 'IPv6' : 'IPv4';
-        promptAction.showToast({ message: `未找到该域名的 ${famLabel} 解析，回退默认` });
+        this.getUIContext().getPromptAction().showToast({ message: `未找到该域名的 ${famLabel} 解析，回退默认` });
         try {
           webview.WebviewController.clearHostIP(host);
         } catch (e) {}
@@ -1195,7 +1235,11 @@ struct Index {
   async backToHome() {
     console.info(`[IPResolve] backToHome triggered, saved_home_url=${this.saved_home_url}`);
     let finalUrl = await this.resolveTargetUrl(this.saved_home_url);
-    this.controller.loadUrl(finalUrl);
+    try {
+      this.controller.loadUrl(finalUrl);
+    } catch (e) {
+      console.error('loadUrl error:', JSON.stringify(e));
+    }
   }
 
   get_isHideBar() {
@@ -1211,7 +1255,12 @@ struct Index {
   }
 
   getuseragentbytype(type: string) {
-    let default_userAgent = this.controller.getUserAgent();
+    let default_userAgent = '';
+    try {
+      default_userAgent = this.controller.getUserAgent();
+    } catch (e) {
+      console.error('getUserAgent error:', JSON.stringify(e));
+    }
     let mobile_userAgent = default_userAgent.replace('PC', 'Mobile').replace('PC', 'Phone');
     let pc_userAgent = default_userAgent.replace('Mobile', 'PC').replace('Phone', 'PC');
     let custom_userAgent = this.c_pg_ua;
@@ -1234,7 +1283,12 @@ struct Index {
   }
 
   change_userAgent() {
-    let default_userAgent = this.controller.getUserAgent();
+    let default_userAgent = '';
+    try {
+      default_userAgent = this.controller.getUserAgent();
+    } catch (e) {
+      console.error('getUserAgent error:', JSON.stringify(e));
+    }
     let mobile_userAgent = default_userAgent.replace('PC', 'Mobile').replace('PC', 'Phone');
     let pc_userAgent = default_userAgent.replace('Mobile', 'PC').replace('Phone', 'PC');
     let custom_userAgent = this.c_pg_ua;
@@ -1248,6 +1302,10 @@ struct Index {
     if (this.ua_type == 'custom') {
       this.userAgent = custom_userAgent;
     }
-    this.controller.setCustomUserAgent(this.userAgent);
+    try {
+      this.controller.setCustomUserAgent(this.userAgent);
+    } catch (e) {
+      console.error('setCustomUserAgent error:', JSON.stringify(e));
+    }
   }
 }

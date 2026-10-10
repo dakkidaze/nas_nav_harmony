@@ -1,6 +1,7 @@
 import { webview } from '@kit.ArkWeb'
 import { BusinessError } from '@kit.BasicServicesKit'
 import { fileIo, picker } from '@kit.CoreFileKit'
+import { AppContext } from '../model/AppContext'
 
 const TAG = 'WebDownloadFileHelper'
 
@@ -40,7 +41,11 @@ export abstract class IAbstractDownloadHandler {
     const dirPath = fullPath.substring(0, fullPath.lastIndexOf('/'))
 
     if (!this.checkPathExists(dirPath)) {
-      fileIo.mkdirSync(dirPath)
+      try {
+        fileIo.mkdirSync(dirPath)
+      } catch (e) {
+        console.error(`${TAG} prepareDirectory mkdirSync error:`, JSON.stringify(e))
+      }
     }
   }
 
@@ -68,7 +73,7 @@ export abstract class IAbstractDownloadHandler {
    * 通用文件保存方法
    * */
   protected async saveFile(filePath: string): Promise<void> {
-    const context = getContext()
+    const context = AppContext.ctx!
     const fileName = this.extractFileName(filePath)
     const saveOptions = new picker.DocumentSaveOptions()
     saveOptions.newFileNames = [fileName]
@@ -101,8 +106,7 @@ export abstract class IAbstractDownloadHandler {
    * 生成默认下载路径
    */
   private generateDefaultPath(): string {
-
-    const defaultDir = `${getContext(this).cacheDir}/web_download`
+    const defaultDir = `${AppContext.ctx?.cacheDir ?? ''}/web_download`
     const fileName = this.webDownloadItem?.getSuggestedFileName()
       || `download_${Date.now()}.bin`
     return `${defaultDir}${fileName}`
@@ -160,15 +164,20 @@ export abstract class IAbstractDownloadHandler {
    * 复制文件内容
    * */
   private async copyFileContents(sourcePath: string, destPath: string) {
-    const sourceFd = await fileIo.open(sourcePath, fileIo.OpenMode.READ_ONLY)
-    const stat = await fileIo.stat(sourcePath)
-    const buffer = new ArrayBuffer(stat.size)
+    try {
+      const sourceFd = await fileIo.open(sourcePath, fileIo.OpenMode.READ_ONLY)
+      const stat = await fileIo.stat(sourcePath)
+      const buffer = new ArrayBuffer(stat.size)
 
-    await fileIo.read(sourceFd.fd, buffer)
-    await fileIo.close(sourceFd)
+      await fileIo.read(sourceFd.fd, buffer)
+      await fileIo.close(sourceFd)
 
-    const destFile = fileIo.openSync(destPath, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE)
-    await fileIo.write(destFile.fd, buffer)
-    await fileIo.close(destFile.fd)
+      const destFile = fileIo.openSync(destPath, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE)
+      await fileIo.write(destFile.fd, buffer)
+      await fileIo.close(destFile.fd)
+    } catch (e) {
+      console.error(`${TAG} copyFileContents error:`, JSON.stringify(e))
+      throw e as Error
+    }
   }
 }

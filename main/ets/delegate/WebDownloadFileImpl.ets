@@ -1,9 +1,9 @@
-import { promptAction } from '@kit.ArkUI'
 import { webview } from '@kit.ArkWeb'
 import { BusinessError } from '@kit.BasicServicesKit'
 import { EventIdConstants } from '../contants/EventIdConstants'
 import { EmitterUtil } from '../utiles/EmitterUtil'
 import { IAbstractDownloadHandler } from './IWebDownloadFile'
+import { AppContext } from '../model/AppContext'
 
 /**
  * @dec web下载文件方法实现,
@@ -40,7 +40,7 @@ export class WebDownloadFileHelper extends IAbstractDownloadHandler {
    * 静态路径生成
    * */
   private static generateDefaultPath(): string {
-    const defaultDir = `${getContext().cacheDir}/web_download`
+    const defaultDir = `${AppContext.ctx?.cacheDir ?? ''}/web_download`
     const fileName = WebDownloadFileHelper._webDownloadItem?.getSuggestedFileName()
       || `download_${Date.now()}.bin`
     return `${defaultDir}${fileName}`
@@ -49,14 +49,22 @@ export class WebDownloadFileHelper extends IAbstractDownloadHandler {
   protected handleDownloadSuccess(): void {
     this.cleanupDownloadSession()
     WebDownloadFileHelper.closeDownloadPopUpWindow()
-    promptAction.showToast({ message: '文件保存成功' })
+    try {
+      AppContext.uiContext?.getPromptAction().showToast({ message: '文件保存成功' })
+    } catch (e) {
+      console.error('showToast error:', JSON.stringify(e))
+    }
   }
 
   protected handleDownloadFailure(message: string): void {
     this.cleanupDownloadSession()
     WebDownloadFileHelper.closeDownloadPopUpWindow()
 
-    promptAction.showToast({ message })
+    try {
+      AppContext.uiContext?.getPromptAction().showToast({ message })
+    } catch (e) {
+      console.error('showToast error:', JSON.stringify(e))
+    }
   }
 
   // 重写抽象类方法

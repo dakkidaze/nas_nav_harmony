@@ -1,12 +1,17 @@
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { AppContext } from '../model/AppContext';
 
 const DOMAIN = 0x0000;
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    globalThis.abilityContext = this.context;
-    this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+    AppContext.ctx = this.context;
+    try {
+      this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+    } catch (e) {
+      console.error('EntryAbility setColorMode error:', JSON.stringify(e));
+    }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 
@@ -23,11 +28,6 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       console.info('获取主窗口的实例：' + JSON.stringify(data));
-      globalThis.windowClass = data // 赋值给全局变量windowClass
-      // 设置全屏显示
-      //globalThis.windowClass.setWindowLayoutFullScreen(true)
-      // 隐藏状态栏显示
-      //globalThis.windowClass.setWindowSystemBarEnable(['navigation'])
     });
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {

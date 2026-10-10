@@ -28,7 +28,7 @@ import { DownloadConfirmDialog } from '../component/DownloadConfirmDialog'
 import { IAbstractDownloadHandler } from '../delegate/IWebDownloadFile'
 import { WebDownloadFileHelper } from '../delegate/WebDownloadFileImpl'
 import { EmitterUtil } from '../utiles/EmitterUtil'
-import { http, connection } from '@kit.NetworkKit';
+import { http, connection, socket } from '@kit.NetworkKit';
 import { fileIo as fs, ReadOptions, WriteOptions } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { BusinessError, systemDateTime } from '@kit.BasicServicesKit';
@@ -120,6 +120,13 @@ struct Index {
   @State themeMode: string = 'system'; // 'system' | 'light' | 'dark'
   @State isDarkActive: boolean = true;  // 当前是否呈现暗色模式（AMOLED黑）
   @State ipResolveMode: string = 'auto'; // 'auto' | 'v4' | 'v6'
+  @State diagMode: string = '-';      // 当前解析模式
+  @State diagTarget: string = '-';    // 目标 host:port
+  @State diagResolved: string = '-';  // 全部解析结果
+  @State diagChosen: string = '-';    // setHostIP 实际指定的 IP
+  @State diagProbe: string = '-';     // TCP 可达性探测结果
+  @State diagLast: string = '-';      // 最近一次 Web 加载结果
+  @State diagLog: string = '';        // 诊断事件日志(最新在上)
   private originalTargetHost: string = ''; // 原始主机名
 
   @Builder
@@ -504,10 +511,20 @@ struct Index {
               .backgroundColor(this.isDarkActive ? '#000000' : '#FFFFFF')
               .onSslErrorEventReceive((event) => {
                 // 允许自签名/内网自建证书通过，保证 NAS 局域网访问正常
+                this.diagLast = `[${this.nowStr()}] SSL错误(已放行)`;
+                this.diagEvent('SSL错误，已 handleConfirm 放行');
                 event.handler.handleConfirm();
               })
               .onErrorReceive((event) => {
-                console.error(`Web error: ${event?.error?.getErrorCode()}, ${event?.error?.getErrorInfo()}`);
+                let code = event?.error?.getErrorCode();
+                let info = event?.error?.getErrorInfo();
+                this.diagLast = `[${this.nowStr()}] 加载失败 ${code} ${info}`;
+                this.diagEvent(`加载失败 ${code} ${info}`);
+                console.error(`Web error: ${code}, ${info}`);
+              })
+              .onPageEnd((event) => {
+                this.diagLast = `[${this.nowStr()}] 加载完成`;
+                this.diagEvent(`加载完成 ${event?.url ?? ''}`);
               })
               .onHttpErrorReceive((event) => {
                 console.error(`HTTP error: ${event?.response?.getResponseCode()}`);
@@ -916,12 +933,62 @@ struct Index {
               .width('100%')
               .margin({ top: 4 })
 
+              // 连接诊断信息
               Divider()
                 .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
                 .margin({ top: 12, bottom: 8 })
 
               Row() {
-                Text("Version: 1.1.0")
+                Text("连接诊断")
+                  .fontSize(15)
+                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+                  .layoutWeight(1)
+                Button('重载')
+                  .height(28)
+                  .width(56)
+                  .type(ButtonType.Capsule)
+                  .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#F0F0F0')
+                  .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
+                  .fontSize(12)
+                  .onClick(() => {
+                    this.backToHome();
+                  })
+                Text().width(6)
+                Button('探测')
+                  .height(28)
+                  .width(56)
+                  .type(ButtonType.Capsule)
+                  .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#F0F0F0')
+                  .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
+                  .fontSize(12)
+                  .onClick(() => {
+                    this.resolveTargetUrl(this.saved_home_url);
+                  })
+              }
+              .width('100%')
+
+              Text(`模式: ${this.diagMode}\n目标: ${this.diagTarget}\n解析: ${this.diagResolved}\n指定: ${this.diagChosen}\n探测: ${this.diagProbe}\n最近: ${this.diagLast}`)
+                .width('100%')
+                .fontSize(12)
+                .lineHeight(18)
+                .fontColor(this.isDarkActive ? '#9A9A9A' : '#666666')
+                .margin({ top: 6 })
+                .textAlign(TextAlign.Start)
+
+              Text(this.diagLog)
+                .width('100%')
+                .fontSize(11)
+                .lineHeight(16)
+                .fontColor(this.isDarkActive ? '#6E6E6E' : '#999999')
+                .margin({ top: 6 })
+                .textAlign(TextAlign.Start)
+
+              Divider()
+                .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
+                .margin({ top: 12, bottom: 8 })
+
+              Row() {
+                Text("Version: 1.1.1")
                   .width('100%')
                   .fontSize(12)
                   .fontColor(this.isDarkActive ? '#666666' : '#999999')
@@ -1024,6 +1091,76 @@ struct Index {
     this.controller.stop();
   }
 
+  private nowStr(): string {
+    let d = new Date();
+    let h = d.getHours();
+    let mi = d.getMinutes();
+    let s = d.getSeconds();
+    let hh = h < 10 ? `0${h}` : `${h}`;
+    let mm = mi < 10 ? `0${mi}` : `${mi}`;
+    let ss = s < 10 ? `0${s}` : `${s}`;
+    return `${hh}:${mm}:${ss}`;
+  }
+
+  // 追加一条诊断事件日志(最新在上，限制长度)
+  private diagEvent(line: string) {
+    this.diagLog = `[${this.nowStr()}] ${line}\n` + this.diagLog;
+    if (this.diagLog.length > 4000) {
+      this.diagLog = this.diagLog.substring(0, 4000);
+    }
+  }
+
+  // 对单个 IP 做 TCP 层可达性探测
+  private async probeTcpAddr(address: string, port: number, family: number): Promise<string> {
+    let tcp = socket.constructTCPSocketInstance();
+    let t0 = Date.now();
+    try {
+      await tcp.connect({ address: { address: address, port: port, family: family }, timeout: 3000 });
+      let ms = Date.now() - t0;
+      try {
+        await tcp.close();
+      } catch (e) {}
+      return `${address} ✓${ms}ms`;
+    } catch (e) {
+      try {
+        await tcp.close();
+      } catch (e2) {}
+      let code = (e as BusinessError)?.code;
+      return `${address} ✗${code !== undefined ? code : ''}`;
+    }
+  }
+
+  // 对所有候选地址做 TCP 探测并写入诊断面板
+  private async runProbe(addresses: connection.NetAddress[], port: number) {
+    let parts: string[] = [];
+    for (let i = 0; i < addresses.length; i++) {
+      let a = addresses[i];
+      let fam = a.family === 2 ? 2 : 1;
+      let r = await this.probeTcpAddr(a.address, port, fam);
+      parts.push(r);
+    }
+    this.diagProbe = parts.join('\n');
+    this.diagEvent(`TCP探测: ${parts.join(' | ')}`);
+  }
+
+  // 将 IPv6 映射形式的 IPv4 (::ffff:1.2.3.4) 归一化为纯 IPv4
+  private normalizeAddr(raw: string): string {
+    if (!raw) {
+      return '';
+    }
+    let m = raw.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
+    return m ? m[1] : raw;
+  }
+
+  // 判断某个解析结果是否为 IPv4 (含 ::ffff: 映射形式)
+  private isV4Addr(raw: string): boolean {
+    if (!raw) {
+      return false;
+    }
+    let a = this.normalizeAddr(raw);
+    return /^(\d{1,3}\.){3}\d{1,3}$/.test(a);
+  }
+
   // 解析并设置指定模式的 DNS IP (使用 ArkWeb 原生 setHostIP 实现域名与 SNI 不变而底层 IP 强制指定)
   async resolveTargetUrl(targetUrl: string): Promise<string> {
     if (!targetUrl || targetUrl.startsWith('/') || targetUrl.startsWith('file://')) {
@@ -1044,52 +1181,102 @@ struct Index {
         host = parts[0];
       }
 
+      // 解析端口
+      let port = proto.toLowerCase() === 'https://' ? 443 : 80;
+      if (authority.startsWith('[')) {
+        let cb = authority.indexOf(']');
+        if (cb !== -1 && authority.charAt(cb + 1) === ':') {
+          let pn = Number.parseInt(authority.substring(cb + 2));
+          if (!Number.isNaN(pn)) {
+            port = pn;
+          }
+        }
+      } else if (authority.includes(':')) {
+        let pn = Number.parseInt(authority.substring(authority.lastIndexOf(':') + 1));
+        if (!Number.isNaN(pn)) {
+          port = pn;
+        }
+      }
+
+      this.diagMode = this.ipResolveMode === 'v6' ? 'IPv6' : (this.ipResolveMode === 'v4' ? 'IPv4' : '默认(系统)');
+      this.diagTarget = `${host}:${port}`;
+
+      // 本身就是 IP 字面量：直接返回
+      if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.startsWith('[')) {
+        this.diagResolved = `${host} (IP字面量)`;
+        this.diagChosen = '-';
+        this.diagProbe = '-';
+        this.diagEvent(`IP字面量直连 host=${host}`);
+        return targetUrl;
+      }
+
+      // 解析全部候选地址（auto 模式也解析，仅用于诊断展示）
+      let addresses: connection.NetAddress[] = [];
+      try {
+        addresses = await connection.getAddressesByName(host);
+      } catch (ee) {
+        this.diagEvent(`DNS解析异常: ${ee}`);
+      }
+      let allList = addresses.map(it => `${this.normalizeAddr(it.address)}(${it.family === 2 ? 'v6' : 'v4'})`).join(', ');
+      this.diagResolved = addresses.length > 0 ? allList : '(空)';
+      console.info(`[IPResolve] host=${host} mode=${this.ipResolveMode} addresses=${JSON.stringify(addresses)}`);
+
       if (this.ipResolveMode === 'auto') {
         try {
           webview.WebviewController.clearHostIP(host);
         } catch (e) {}
+        this.diagChosen = '未指定(系统DNS)';
+        this.diagEvent(`模式=默认 解析=${this.diagResolved}`);
+        if (addresses.length > 0) {
+          this.runProbe(addresses, port);
+        }
         return targetUrl;
       }
 
-      // 如果本身就是 IP 字面量，直接返回
-      if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.startsWith('[')) {
-        return targetUrl;
-      }
-
-      // 使用 connection.getAddressesByName 解析 DNS
-      let addresses = await connection.getAddressesByName(host);
-      if (!addresses || addresses.length === 0) {
+      if (addresses.length === 0) {
+        this.diagChosen = '解析为空，回退默认';
+        this.diagEvent('解析结果为空，回退默认');
         return targetUrl;
       }
 
       let chosenIp = '';
       if (this.ipResolveMode === 'v6') {
-        let v6Obj = addresses.find(item => item.address && item.address.includes(':'));
+        let v6Obj = addresses.find(it => it.address && it.address.includes(':') && !this.isV4Addr(it.address));
         if (v6Obj) {
-          chosenIp = v6Obj.address;
-        } else {
-          promptAction.showToast({ message: '未找到该域名的IPv6解析，回退默认' });
-          webview.WebviewController.clearHostIP(host);
-          return targetUrl;
+          chosenIp = this.normalizeAddr(v6Obj.address);
         }
       } else if (this.ipResolveMode === 'v4') {
-        let v4Obj = addresses.find(item => item.address && item.address.includes('.') && !item.address.includes(':'));
+        let v4Obj = addresses.find(it => it.address && this.isV4Addr(it.address));
         if (v4Obj) {
-          chosenIp = v4Obj.address;
-        } else {
-          promptAction.showToast({ message: '未找到该域名的IPv4解析，回退默认' });
-          webview.WebviewController.clearHostIP(host);
-          return targetUrl;
+          chosenIp = this.normalizeAddr(v4Obj.address);
         }
       }
 
       if (chosenIp) {
-        // 利用 ArkWeb 原生提供的 setHostIP 绑定该域名的解析 IP
-        // 这样 URL 依然是域名（完整保留 HTTPS SNI、Let's Encrypt 证书验证与 Cookie），
-        // 但底层网络请求强制走选定的 IPv4 或 IPv6！
-        webview.WebviewController.setHostIP(host, chosenIp, 300);
+        try {
+          // 利用 ArkWeb 原生 setHostIP 绑定域名解析 IP：URL 保持域名(保留 SNI/证书/Cookie)，底层强制走选定 IP
+          webview.WebviewController.setHostIP(host, chosenIp, 300);
+          this.diagChosen = `${chosenIp} (setHostIP 300s)`;
+          this.diagEvent(`setHostIP ${host} -> ${chosenIp}`);
+        } catch (e) {
+          this.diagChosen = `setHostIP失败: ${(e as BusinessError)?.code}`;
+          this.diagEvent(`setHostIP失败: ${e}`);
+        }
+      } else {
+        let famLabel = this.ipResolveMode === 'v6' ? 'IPv6' : 'IPv4';
+        promptAction.showToast({ message: `未找到该域名的 ${famLabel} 解析，回退默认` });
+        try {
+          webview.WebviewController.clearHostIP(host);
+        } catch (e) {}
+        this.diagChosen = `未找到 ${famLabel}，回退默认`;
+        this.diagEvent(`未找到 ${famLabel} 解析，回退默认`);
+      }
+
+      if (addresses.length > 0) {
+        this.runProbe(addresses, port);
       }
     } catch (e) {
+      this.diagEvent(`DNS resolve failed: ${e}`);
       console.error(`DNS resolve failed: ${e}`);
     }
 
@@ -1098,6 +1285,7 @@ struct Index {
 
   // 返回首页 / 加载目标 URL
   async backToHome() {
+    console.info(`[IPResolve] backToHome triggered, saved_home_url=${this.saved_home_url}`);
     let finalUrl = await this.resolveTargetUrl(this.saved_home_url);
     this.controller.loadUrl(finalUrl);
   }

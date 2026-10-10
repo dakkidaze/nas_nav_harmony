@@ -97,3 +97,27 @@ export async function getSlidenum(): Promise<number> {
   return Number(await store.get('slide_num', 0));
 }
 
+// IP解析模式: 'auto' (系统默认) | 'v4' (IPv4优先/仅v4) | 'v6' (IPv6优先/仅v6)
+export async function saveIpResolveMode(mode: string) {
+  const store = await getPreferences();
+  await store.put('ip_resolve_mode', mode);
+  await store.flush();
+}
+
+export async function getIpResolveMode(): Promise<string> {
+  const store = await getPreferences();
+  return String(await store.get('ip_resolve_mode', 'auto'));
+}
+
+// 主题模式: 'system' (跟随系统) | 'light' (亮色) | 'dark' (AMOLED纯黑)
+export async function saveThemeMode(theme: string) {
+  const store = await getPreferences();
+  await store.put('theme_mode', theme);
+  await store.flush();
+}
+
+export async function getThemeMode(): Promise<string> {
+  const store = await getPreferences();
+  return String(await store.get('theme_mode', 'system'));
+}
+

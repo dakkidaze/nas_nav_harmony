@@ -1,0 +1,8 @@
+.hvigor/
+dist/
+build/
+.ohpm/
+oh_modules/
+*.hap
+*.hsp
+*.app

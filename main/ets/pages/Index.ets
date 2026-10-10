@@ -502,6 +502,16 @@ struct Index {
               .darkMode(this.isDarkActive ? WebDarkMode.On : WebDarkMode.Auto)
               .forceDarkAccess(this.isDarkActive)
               .backgroundColor(this.isDarkActive ? '#000000' : '#FFFFFF')
+              .onSslErrorEventReceive((event) => {
+                // 允许自签名/内网自建证书通过，保证 NAS 局域网访问正常
+                event.handler.handleConfirm();
+              })
+              .onErrorReceive((event) => {
+                console.error(`Web error: ${event?.error?.getErrorCode()}, ${event?.error?.getErrorInfo()}`);
+              })
+              .onHttpErrorReceive((event) => {
+                console.error(`HTTP error: ${event?.response?.getResponseCode()}`);
+              })
           }
           .width("100%")
           .height("100%")

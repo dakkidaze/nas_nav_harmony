@@ -1033,6 +1033,14 @@ struct Index {
       return targetUrl;
     }
 
+    // 注意：HTTPS 服务严重依赖 SNI (Server Name Indication) 协商正确证书。
+    // 如果把 URL 替换为 IP（例如 https://123.56.28.195:8000），TLS 客户端 ClientHello
+    // 发送的 ServerName 会变成 IP 地址，服务端将回退到默认自签名证书或重置握手导致加载失败。
+    // 因此对于 HTTPS 站点，不直接篡改 URL 里的域名。
+    if (targetUrl.toLowerCase().startsWith('https://')) {
+      return targetUrl;
+    }
+
     try {
       // 提取协议、主机名及端口与路径
       let protoMatch = targetUrl.match(/^https?:\/\//i);

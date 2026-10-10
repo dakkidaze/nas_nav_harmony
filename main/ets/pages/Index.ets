@@ -1024,20 +1024,9 @@ struct Index {
     this.controller.stop();
   }
 
-  // 解析目标地址（支持 IPv4 / IPv6 模式调度）
+  // 解析并设置指定模式的 DNS IP (使用 ArkWeb 原生 setHostIP 实现域名与 SNI 不变而底层 IP 强制指定)
   async resolveTargetUrl(targetUrl: string): Promise<string> {
     if (!targetUrl || targetUrl.startsWith('/') || targetUrl.startsWith('file://')) {
-      return targetUrl;
-    }
-    if (this.ipResolveMode === 'auto') {
-      return targetUrl;
-    }
-
-    // 注意：HTTPS 服务严重依赖 SNI (Server Name Indication) 协商正确证书。
-    // 如果把 URL 替换为 IP（例如 https://123.56.28.195:8000），TLS 客户端 ClientHello
-    // 发送的 ServerName 会变成 IP 地址，服务端将回退到默认自签名证书或重置握手导致加载失败。
-    // 因此对于 HTTPS 站点，不直接篡改 URL 里的域名。
-    if (targetUrl.toLowerCase().startsWith('https://')) {
       return targetUrl;
     }
 
@@ -1048,21 +1037,22 @@ struct Index {
       let rest = targetUrl.substring(proto.length);
       let slashIdx = rest.indexOf('/');
       let authority = slashIdx !== -1 ? rest.substring(0, slashIdx) : rest;
-      let pathAndQuery = slashIdx !== -1 ? rest.substring(slashIdx) : '';
 
       let host = authority;
-      let port = '';
       if (authority.includes(':') && !authority.startsWith('[')) {
         let parts = authority.split(':');
         host = parts[0];
-        port = ':' + parts[1];
-      } else if (authority.startsWith('[')) {
-        // 已经是 IPv6 字面量
+      }
+
+      if (this.ipResolveMode === 'auto') {
+        try {
+          webview.WebviewController.clearHostIP(host);
+        } catch (e) {}
         return targetUrl;
       }
 
-      // 如果本身就是 IPv4 地址，直接返回
-      if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
+      // 如果本身就是 IP 字面量，直接返回
+      if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.startsWith('[')) {
         return targetUrl;
       }
 
@@ -1076,9 +1066,10 @@ struct Index {
       if (this.ipResolveMode === 'v6') {
         let v6Obj = addresses.find(item => item.address && item.address.includes(':'));
         if (v6Obj) {
-          chosenIp = `[${v6Obj.address}]`;
+          chosenIp = v6Obj.address;
         } else {
           promptAction.showToast({ message: '未找到该域名的IPv6解析，回退默认' });
+          webview.WebviewController.clearHostIP(host);
           return targetUrl;
         }
       } else if (this.ipResolveMode === 'v4') {
@@ -1087,14 +1078,16 @@ struct Index {
           chosenIp = v4Obj.address;
         } else {
           promptAction.showToast({ message: '未找到该域名的IPv4解析，回退默认' });
+          webview.WebviewController.clearHostIP(host);
           return targetUrl;
         }
       }
 
       if (chosenIp) {
-        this.originalTargetHost = host;
-        let resolvedUrl = `${proto}${chosenIp}${port}${pathAndQuery}`;
-        return resolvedUrl;
+        // 利用 ArkWeb 原生提供的 setHostIP 绑定该域名的解析 IP
+        // 这样 URL 依然是域名（完整保留 HTTPS SNI、Let's Encrypt 证书验证与 Cookie），
+        // 但底层网络请求强制走选定的 IPv4 或 IPv6！
+        webview.WebviewController.setHostIP(host, chosenIp, 300);
       }
     } catch (e) {
       console.error(`DNS resolve failed: ${e}`);
@@ -1106,12 +1099,7 @@ struct Index {
   // 返回首页 / 加载目标 URL
   async backToHome() {
     let finalUrl = await this.resolveTargetUrl(this.saved_home_url);
-    if (this.originalTargetHost && finalUrl !== this.saved_home_url) {
-      // 传递 Host 请求头
-      this.controller.loadUrl(finalUrl, [{ headerKey: 'Host', headerValue: this.originalTargetHost }]);
-    } else {
-      this.controller.loadUrl(finalUrl);
-    }
+    this.controller.loadUrl(finalUrl);
   }
 
   get_isLSRefresh() {

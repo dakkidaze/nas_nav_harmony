@@ -163,31 +163,6 @@ export async function getIsfull(): Promise<string> {
   return '';
 }
 
-export async function saveSlidenum(slidenum: number) {
-  try {
-    const store = await getPreferences();
-    if (store) {
-      await store.put('slide_num', slidenum);
-      await store.flush(); // 刷新保存
-    }
-  } catch (e) {
-    console.error('saveSlidenum error:', JSON.stringify(e));
-  }
-}
-
-export async function getSlidenum(): Promise<number> {
-  try {
-    const store = await getPreferences();
-    if (store) {
-      return Number(await store.get('slide_num', 0));
-    }
-  } catch (e) {
-    console.error('getSlidenum error:', JSON.stringify(e));
-  }
-  return 0;
-}
-
-// IP解析模式: 'auto' (系统默认) | 'v4' (IPv4优先/仅v4) | 'v6' (IPv6优先/仅v6)
 export async function saveIpResolveMode(mode: string) {
   try {
     const store = await getPreferences();
@@ -236,4 +211,30 @@ export async function getThemeMode(): Promise<string> {
   }
   return 'system';
 }
+
+// 网页反色: 'off' (默认关闭) | 'app' (跟随应用)
+export async function saveWebDarkMode(mode: string) {
+  try {
+    const store = await getPreferences();
+    if (store) {
+      await store.put('web_dark_mode', mode);
+      await store.flush();
+    }
+  } catch (e) {
+    console.error('saveWebDarkMode error:', JSON.stringify(e));
+  }
+}
+
+export async function getWebDarkMode(): Promise<string> {
+  try {
+    const store = await getPreferences();
+    if (store) {
+      return String(await store.get('web_dark_mode', 'off'));
+    }
+  } catch (e) {
+    console.error('getWebDarkMode error:', JSON.stringify(e));
+  }
+  return 'off';
+}
+
 

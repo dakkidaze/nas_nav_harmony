@@ -59,6 +59,7 @@
         }
       },
       {"name": "ohos.permission.GET_NETWORK_INFO"},
+      {"name": "ohos.permission.VIBRATE"},
       {
         "name": "ohos.permission.WRITE_IMAGEVIDEO",
         "reason": "$string:permission_write_imagevideo_reason",

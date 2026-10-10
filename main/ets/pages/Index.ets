@@ -14,14 +14,15 @@ import {
   saveUserAgentType,
   getIsfull,
   saveIsfull,
-  getSlidenum,
-  saveSlidenum,
   getIpResolveMode,
   saveIpResolveMode,
   getThemeMode,
-  saveThemeMode
+  saveThemeMode,
+  getWebDarkMode,
+  saveWebDarkMode
 } from '../model/StorageService';
 import { DownloadConfirmDialog } from '../component/DownloadConfirmDialog'
+import { FloatBall } from '../component/FloatBall';
 import { IAbstractDownloadHandler } from '../delegate/IWebDownloadFile'
 import { WebDownloadFileHelper } from '../delegate/WebDownloadFileImpl'
 import { EmitterUtil } from '../utiles/EmitterUtil'
@@ -123,6 +124,9 @@ struct Index {
   // 主题与IP解析偏好状态
   @State themeMode: string = 'system'; // 'system' | 'light' | 'dark'
   @State isDarkActive: boolean = true;  // 当前是否呈现暗色模式（AMOLED黑）
+  @State webDarkMode: string = 'off';   // 'off'(关闭) | 'app'(跟随应用)
+  @State contentW: number = 0;          // 主页容器实测宽(vp)，传给悬浮球定位
+  @State contentH: number = 0;          // 主页容器实测高(vp)
   @State ipResolveMode: string = 'auto'; // 'auto' | 'v4' | 'v6'
   @State diagMode: string = '-';      // 当前解析模式
   @State diagTarget: string = '-';    // 目标 host:port
@@ -210,8 +214,7 @@ struct Index {
     .visibility(this.pic_dl_show)
   }
 
-  @State refreshing: boolean = false
-  @State list: number[] = Array(20).fill(Date.now())
+  @Provide('pathStack') pathStack: NavPathStack = new NavPathStack();
   @State is_home: boolean = false;
   @State home_url: string = ''
   @State saved_home_url: string = resourceDir + "/nasnav.html";
@@ -219,14 +222,9 @@ struct Index {
   @State c_ua_temp: string = '';
   @State ua_type: string = 'Mobile';
   @State userAgent: string = '';
-  @State showTopRow: boolean = false;
-  @State showRefreshRow: boolean = true;
-  @State showButtonRow: boolean = true;
-  @State showSetting: boolean = false;
   @State isHidebar: string = 'false';
   @State isHidestatus: string = 'false';
   @State isFull: string = 'true';
-  @State slide_num: number = 0.3;
 
   async setSystemFull(is_full: string, is_hidestatus: string, is_hidebar: string) {
     if (!AppContext.ctx) {
@@ -327,8 +325,8 @@ struct Index {
     this.isHidestatus = (await getIshidestatus() || this.isHidestatus);
     this.ua_type = (await getUserAgentType() || this.ua_type);
     this.isFull = (await getIsfull() || this.isFull);
-    this.slide_num = (await getSlidenum() || this.slide_num);
     this.ipResolveMode = (await getIpResolveMode() || this.ipResolveMode);
+    this.webDarkMode = (await getWebDarkMode() || this.webDarkMode);
     this.themeMode = (await getThemeMode() || this.themeMode);
     this.applyThemeMode(this.themeMode);
 
@@ -343,685 +341,665 @@ struct Index {
   }
 
   @Builder
-  content() {
-    Stack() {
-      Column() {
-        Row() {
-          TextInput({
-            placeholder: '请输入有效的URL地址',
-            text: this.saved_home_url
-          })
-            .height(34)
-            .width("76%")
-            .backgroundColor(this.isDarkActive ? '#1E1E1E' : '#FFFFFF')
-            .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
-            .placeholderColor(this.isDarkActive ? '#777777' : '#999999')
-            .onChange((value) => {
-              this.home_url = value;
-            })
-
-          Button('保存')
-            .height(34)
-            .width("20%")
-            .type(ButtonType.Capsule)
-            .backgroundColor(this.isDarkActive ? '#FFFFFF' : '#000000')
-            .fontColor(this.isDarkActive ? '#000000' : '#FFFFFF')
-            .onClick(() => {
-              if (this.home_url) {
-                saveHomeUrl(this.home_url);
-                this.saved_home_url = this.home_url
-                this.backToHome();
-              }
-              this.showTopRow = false
-              this.showRefreshRow = true
-              this.showButtonRow = true
-              this.onRefreshing();
-            })
-        }
-        .visibility(this.showTopRow ? Visibility.Visible : Visibility.None)
-        .height(44)
-        .width("100%")
-        .alignItems(VerticalAlign.Center)
-        .justifyContent(FlexAlign.SpaceAround)
-
-        Row() {
-          LoadingProgress()
-            .height(28)
-            .color(this.isDarkActive ? '#FFFFFF' : '#000000')
-          Text('正在刷新...')
-            .fontSize(15)
-            .fontColor(this.isDarkActive ? '#E0E0E0' : '#333333')
-            .margin({ left: 16 })
-        }
-        .visibility(this.showRefreshRow ? Visibility.Visible : Visibility.None)
-        .alignItems(VerticalAlign.Center)
-
-        Row() {
-          Button({ type: ButtonType.Circle }) {
-            Image($r('app.media.settings'))
-              .width(20)
-              .height(20)
-          }
-          .backgroundColor(this.isDarkActive ? '#2A2A2A' : '#E0E0E0')
-          .onClick(() => {
-            this.showSetting = true
-          })
-          .height(34)
-          .width(34)
-
-          Button("清除缓存")
-            .onClick(() => {
-              this.controller.removeCache(true)
-              this.getUIContext().getPromptAction().showToast({ message: '缓存已清除' });
-            })
-            .height(34)
-            .width("28%")
-            .backgroundColor(this.isDarkActive ? '#2A2A2A' : '#E0E0E0')
-            .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
-
-          Button("返回首页")
-            .onClick(() => {
-              this.is_home = true
-              this.backToHome()
-              setTimeout(() => {
-                this.is_home = false
-              }, 1000);
-            })
-            .height(34)
-            .width("54%")
-            .backgroundColor(this.isDarkActive ? '#FFFFFF' : '#000000')
-            .fontColor(this.isDarkActive ? '#000000' : '#FFFFFF')
-        }
-        .visibility(this.showButtonRow ? Visibility.Visible : Visibility.None)
-        .padding({ top: 6, bottom: 6 })
-        .height(46)
-        .width("100%")
-        .alignItems(VerticalAlign.Center)
-        .backgroundColor(this.isDarkActive ? '#000000' : '#F5F5F7')
-        .justifyContent(FlexAlign.SpaceAround)
-      }
+  PageMap(name: string) {
+    if (name === 'settings') {
+      this.SettingsDestination();
     }
   }
 
-  build() {
-    Stack() {
-      Refresh({ refreshing: $$this.refreshing, builder: this.content() }) {
-        NavDestination() {
-          Column() {
-            Web({ src: this.saved_home_url, controller: this.controller })
-              .onControllerAttached(() => {
-                this.controller.setNetworkAvailable(true);
-                this.webDownloadFile.setDownloadDelegate(this.controller);
-                console.info("onControllerAttached");
-                try {
-                  this.change_userAgent()
-                } catch (error) {
-                  console.error(`ErrorCode: ${(error as BusinessError).code},  Message: ${(error as BusinessError).message}`);
-                }
-              })
-              .onContextMenuShow((event) => {
-                  this.result = event.result
-                  this.imgUrl = event.param.getSourceUrl();
-                  let hitValue = this.controller.getLastHitTest()
-                  let img64 = hitValue.extra
-                if(this.imgUrl==''&&img64!=''){
-                  this.imgUrl = img64
-                }
-                let mediaType = event.param.getMediaType()
-                if (mediaType === ContextMenuMediaType.Image) {
-                  if(this.imgUrl.startsWith("data:image")) {
-                  } else {
-                    if(this.imgUrl != '') {
-                      this.showMenu = true;
-                      this.pic_dl_show = Visibility.Hidden;
-                    }
-                  }
-                }
-                return true;
-              })
-              .bindPopup(this.showMenu,
-                {
-                  builder: this.MenuBuilder(),
-                  enableArrow: false,
-                  placement: Placement.LeftTop,
-                  offset: { x: this.offsetX, y: this.offsetY },
-                  mask: false,
-                  onStateChange: (e) => {
-                    if (!e.isVisible) {
-                      this.showMenu = false;
-                    }
-                  }
-                })
-              .domStorageAccess(true)
-              .javaScriptAccess(true)
-              .geolocationAccess(true)
-              .imageAccess(true)
-              .onlineImageAccess(true)
-              .fileAccess(true)
-              .mediaPlayGestureAccess(true)
-              .mixedMode(MixedMode.Compatible)
-              .darkMode(this.isDarkActive ? WebDarkMode.On : WebDarkMode.Auto)
-              .forceDarkAccess(this.isDarkActive)
-              .backgroundColor(this.isDarkActive ? '#000000' : '#FFFFFF')
-              .onSslErrorEventReceive((event) => {
-                // 允许自签名/内网自建证书通过，保证 NAS 局域网访问正常
-                this.diagLast = `[${this.nowStr()}] SSL错误(已放行)`;
-                this.diagEvent('SSL错误，已 handleConfirm 放行');
-                event.handler.handleConfirm();
-              })
-              .onErrorReceive((event) => {
-                let code = event?.error?.getErrorCode();
-                let info = event?.error?.getErrorInfo();
-                this.diagLast = `[${this.nowStr()}] 加载失败 ${code} ${info}`;
-                this.diagEvent(`加载失败 ${code} ${info}`);
-                console.error(`Web error: ${code}, ${info}`);
-              })
-              .onPageEnd((event) => {
-                this.diagLast = `[${this.nowStr()}] 加载完成`;
-                this.diagEvent(`加载完成 ${event?.url ?? ''}`);
-              })
-              .onHttpErrorReceive((event) => {
-                console.error(`HTTP error: ${event?.response?.getResponseCode()}`);
-              })
-          }
-          .width("100%")
-          .height("100%")
-          .backgroundColor(this.isDarkActive ? '#000000' : '#FFFFFF')
-        }
-      }
-      .pullDownRatio(this.slide_num)
-      .backgroundColor(this.isDarkActive ? '#000000' : '#F5F5F7')
-      .onRefreshing(() => this.onRefreshing())
-      .width('100%')
-      .height('100%')
-
-      // 设置弹窗
+  @Builder
+  SettingsDestination() {
+    NavDestination() {
       Column() {
-        Column() {
-          Scroll() {
-            Column() {
-              // 首页设置
-              Row() {
-                Text("首页")
-                  .width("16%")
-                  .height(34)
-                  .fontSize(15)
-                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                TextInput({
-                  placeholder: '请输入有效的URL地址',
-                  text: this.saved_home_url
+        // 顶部导航栏
+        Row() {
+          Button({ type: ButtonType.Circle }) {
+            Text('←')
+              .fontSize(20)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
+          }
+          .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#E5E5EA')
+          .width(36)
+          .height(36)
+          .onClick(() => {
+            this.c_ua_temp = this.c_pg_ua;
+            this.pathStack.pop();
+          })
+
+          Text("设置")
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
+            .margin({ left: 12 })
+
+          Blank()
+
+          Button("完成")
+            .type(ButtonType.Capsule)
+            .height(32)
+            .padding({ left: 16, right: 16 })
+            .backgroundColor(this.isDarkActive ? '#FFFFFF' : '#000000')
+            .fontColor(this.isDarkActive ? '#000000' : '#FFFFFF')
+            .fontSize(14)
+            .onClick(() => {
+              this.c_ua_temp = this.c_pg_ua;
+              this.pathStack.pop();
+            })
+        }
+        .width('100%')
+        .height(56)
+        .padding({ left: 16, right: 16 })
+        .alignItems(VerticalAlign.Center)
+        .backgroundColor(this.isDarkActive ? '#121212' : '#FFFFFF')
+        .border({
+          width: { bottom: 1 },
+          color: this.isDarkActive ? '#262626' : '#E8E8E8'
+        })
+
+        // 设置内容滚动区
+        Scroll() {
+          Column() {
+            // 快捷操作：清除缓存 / 返回首页
+            Row() {
+              Button("清除缓存")
+                .onClick(() => {
+                  try {
+                    this.controller.removeCache(true);
+                    this.getUIContext().getPromptAction().showToast({ message: '缓存已清除' });
+                  } catch (e) {
+                    console.error('removeCache error:', JSON.stringify(e));
+                  }
                 })
-                  .height(34)
-                  .width("64%")
-                  .padding({ top: '4vp', right: '10vp', bottom: '4vp', left: '10vp' })
-                  .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#FFFFFF')
-                  .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
-                  .placeholderColor(this.isDarkActive ? '#777777' : '#999999')
-                  .onChange((value) => {
-                    this.home_url = value;
-                  })
-                Text().width(6)
-                Button('保存')
-                  .height(34)
-                  .width("18%")
-                  .type(ButtonType.Capsule)
-                  .backgroundColor(this.isDarkActive ? '#FFFFFF' : '#000000')
-                  .fontColor(this.isDarkActive ? '#000000' : '#FFFFFF')
-                  .onClick(() => {
-                    if (this.home_url) {
-                      saveHomeUrl(this.home_url);
-                      this.saved_home_url = this.home_url;
+                .height(36)
+                .layoutWeight(1)
+                .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#E5E5EA')
+                .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
+
+              Blank().width(12)
+
+              Button("返回首页")
+                .onClick(() => {
+                  this.is_home = true;
+                  this.backToHome();
+                  setTimeout(() => {
+                    this.is_home = false;
+                  }, 1000);
+                  this.pathStack.pop();
+                })
+                .height(36)
+                .layoutWeight(1)
+                .backgroundColor(this.isDarkActive ? '#FFFFFF' : '#000000')
+                .fontColor(this.isDarkActive ? '#000000' : '#FFFFFF')
+            }
+            .width('100%')
+            .margin({ bottom: 16 })
+
+            // 首页设置
+            Row() {
+              Text("首页")
+                .width("16%")
+                .height(34)
+                .fontSize(15)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+              TextInput({
+                placeholder: '请输入有效的URL地址',
+                text: this.saved_home_url
+              })
+                .height(34)
+                .width("64%")
+                .padding({ top: '4vp', right: '10vp', bottom: '4vp', left: '10vp' })
+                .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#FFFFFF')
+                .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
+                .placeholderColor(this.isDarkActive ? '#777777' : '#999999')
+                .onChange((value) => {
+                  this.home_url = value;
+                })
+              Text().width(6)
+              Button('保存')
+                .height(34)
+                .width("18%")
+                .type(ButtonType.Capsule)
+                .backgroundColor(this.isDarkActive ? '#FFFFFF' : '#000000')
+                .fontColor(this.isDarkActive ? '#000000' : '#FFFFFF')
+                .onClick(() => {
+                  if (this.home_url) {
+                    saveHomeUrl(this.home_url);
+                    this.saved_home_url = this.home_url;
+                    this.backToHome();
+                    this.getUIContext().getPromptAction().showToast({ message: '首页已保存并加载' });
+                  }
+                })
+            }
+            .width('100%')
+
+            // 分割线
+            Divider()
+              .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
+              .margin({ top: 12, bottom: 12 })
+
+            // IP解析偏好
+            Row() {
+              Text("IP解析")
+                .width('18%')
+                .fontSize(15)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+              Row() {
+                Radio({ value: 'auto', group: 'ip_resolve_group' })
+                  .checked(this.ipResolveMode === 'auto')
+                  .height(20)
+                  .onChange((isChecked) => {
+                    if (isChecked) {
+                      this.ipResolveMode = 'auto';
+                      saveIpResolveMode('auto');
                       this.backToHome();
                     }
                   })
-              }
-              .width('100%')
-
-              // 分割线
-              Divider()
-                .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
-                .margin({ top: 12, bottom: 12 })
-
-              // IP解析偏好
-              Row() {
-                Text("IP解析")
-                  .width('18%')
-                  .fontSize(15)
-                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                Row() {
-                  Radio({ value: 'auto', group: 'ip_resolve_group' })
-                    .checked(this.ipResolveMode === 'auto')
-                    .height(20)
-                    .onChange((isChecked) => {
-                      if (isChecked) {
-                        this.ipResolveMode = 'auto';
-                        saveIpResolveMode('auto');
-                        this.backToHome();
-                      }
-                    })
-                  Text("默认")
-                    .fontSize(14)
-                    .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                    .margin({ right: 10 })
-
-                  Radio({ value: 'v4', group: 'ip_resolve_group' })
-                    .checked(this.ipResolveMode === 'v4')
-                    .height(20)
-                    .onChange((isChecked) => {
-                      if (isChecked) {
-                        this.ipResolveMode = 'v4';
-                        saveIpResolveMode('v4');
-                        this.backToHome();
-                      }
-                    })
-                  Text("IPv4")
-                    .fontSize(14)
-                    .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                    .margin({ right: 10 })
-
-                  Radio({ value: 'v6', group: 'ip_resolve_group' })
-                    .checked(this.ipResolveMode === 'v6')
-                    .height(20)
-                    .onChange((isChecked) => {
-                      if (isChecked) {
-                        this.ipResolveMode = 'v6';
-                        saveIpResolveMode('v6');
-                        this.backToHome();
-                      }
-                    })
-                  Text("IPv6")
-                    .fontSize(14)
-                    .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                }
-              }
-              .width('100%')
-
-              // 主题模式选择
-              Divider()
-                .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
-                .margin({ top: 12, bottom: 12 })
-
-              Row() {
-                Text("外观主题")
-                  .width('20%')
-                  .fontSize(15)
-                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                Row() {
-                  Radio({ value: 'system', group: 'theme_mode_group' })
-                    .checked(this.themeMode === 'system')
-                    .height(20)
-                    .onChange((isChecked) => {
-                      if (isChecked) {
-                        this.applyThemeMode('system');
-                      }
-                    })
-                  Text("跟随系统")
-                    .fontSize(13)
-                    .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                    .margin({ right: 8 })
-
-                  Radio({ value: 'light', group: 'theme_mode_group' })
-                    .checked(this.themeMode === 'light')
-                    .height(20)
-                    .onChange((isChecked) => {
-                      if (isChecked) {
-                        this.applyThemeMode('light');
-                      }
-                    })
-                  Text("亮色")
-                    .fontSize(13)
-                    .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                    .margin({ right: 8 })
-
-                  Radio({ value: 'dark', group: 'theme_mode_group' })
-                    .checked(this.themeMode === 'dark')
-                    .height(20)
-                    .onChange((isChecked) => {
-                      if (isChecked) {
-                        this.applyThemeMode('dark');
-                      }
-                    })
-                  Text("AMOLED黑")
-                    .fontSize(13)
-                    .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                }
-              }
-              .width('100%')
-
-              // UA设置
-              Divider()
-                .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
-                .margin({ top: 12, bottom: 12 })
-
-              Row() {
-                Text("UA")
-                  .width('16%')
-                  .fontSize(15)
-                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                Radio({ value: 'Mobile', group: 'ua_type_group' })
-                  .checked(this.ua_type === 'Mobile')
-                  .onChange((isChecked) => {
-                    if (isChecked) {
-                      this.ua_type = 'Mobile';
-                      saveUserAgentType('Mobile');
-                      this.change_userAgent();
-                      this.refreshWeb();
-                    }
-                  })
-                  .height(20)
-                Text("手机")
+                Text("默认")
                   .fontSize(14)
                   .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                  .onClick(() => {
-                    if (this.ua_type == 'custom') {
-                      this.c_ua_temp = this.getuseragentbytype('Mobile');
-                    }
-                  })
+                  .margin({ right: 10 })
 
-                Radio({ value: 'PC', group: 'ua_type_group' })
-                  .checked(this.ua_type === 'PC')
+                Radio({ value: 'v4', group: 'ip_resolve_group' })
+                  .checked(this.ipResolveMode === 'v4')
+                  .height(20)
                   .onChange((isChecked) => {
                     if (isChecked) {
-                      this.ua_type = 'PC';
-                      saveUserAgentType('PC');
-                      this.change_userAgent();
-                      this.refreshWeb();
+                      this.ipResolveMode = 'v4';
+                      saveIpResolveMode('v4');
+                      this.backToHome();
                     }
                   })
-                  .height(20)
-                Text("电脑")
+                Text("IPv4")
                   .fontSize(14)
                   .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                  .onClick(() => {
-                    if (this.ua_type == 'custom') {
-                      this.c_ua_temp = this.getuseragentbytype('PC');
-                    }
-                  })
+                  .margin({ right: 10 })
 
-                Radio({ value: 'custom', group: 'ua_type_group' })
-                  .checked(this.ua_type === 'custom')
+                Radio({ value: 'v6', group: 'ip_resolve_group' })
+                  .checked(this.ipResolveMode === 'v6')
+                  .height(20)
                   .onChange((isChecked) => {
                     if (isChecked) {
-                      this.ua_type = 'custom';
-                      saveUserAgentType('custom');
-                      this.change_userAgent();
-                      this.refreshWeb();
+                      this.ipResolveMode = 'v6';
+                      saveIpResolveMode('v6');
+                      this.backToHome();
                     }
                   })
-                  .height(20)
-                Text("自定义")
+                Text("IPv6")
                   .fontSize(14)
                   .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                  .onClick(() => {
-                    if (this.ua_type == 'custom') {
-                      this.c_ua_temp = this.getuseragentbytype('custom');
-                    }
-                  })
               }
-              .justifyContent(FlexAlign.SpaceAround)
-              .width('100%')
+            }
+            .width('100%')
 
+            // 外观主题
+            Divider()
+              .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
+              .margin({ top: 12, bottom: 12 })
+
+            Row() {
+              Text("外观主题")
+                .width('20%')
+                .fontSize(15)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
               Row() {
-                TextArea({
-                  text: this.c_ua_temp,
-                  placeholder: '请输入UA(可不填)，确认才保存。点击上方[手机][电脑][自定义]文字可将其UA复制到此处。'
+                Radio({ value: 'system', group: 'theme_mode_group' })
+                  .checked(this.themeMode === 'system')
+                  .height(20)
+                  .onChange((isChecked) => {
+                    if (isChecked) {
+                      this.applyThemeMode('system');
+                    }
+                  })
+                Text("跟随系统")
+                  .fontSize(13)
+                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+                  .margin({ right: 8 })
+
+                Radio({ value: 'light', group: 'theme_mode_group' })
+                  .checked(this.themeMode === 'light')
+                  .height(20)
+                  .onChange((isChecked) => {
+                    if (isChecked) {
+                      this.applyThemeMode('light');
+                    }
+                  })
+                Text("亮色")
+                  .fontSize(13)
+                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+                  .margin({ right: 8 })
+
+                Radio({ value: 'dark', group: 'theme_mode_group' })
+                  .checked(this.themeMode === 'dark')
+                  .height(20)
+                  .onChange((isChecked) => {
+                    if (isChecked) {
+                      this.applyThemeMode('dark');
+                    }
+                  })
+                Text("AMOLED黑")
+                  .fontSize(13)
+                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+              }
+            }
+            .width('100%')
+
+            // 网页反色（独立设置）
+            Divider()
+              .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
+              .margin({ top: 12, bottom: 12 })
+
+            Row() {
+              Text("网页反色")
+                .width('20%')
+                .fontSize(15)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+              Row() {
+                Radio({ value: 'off', group: 'web_dark_mode_group' })
+                  .checked(this.webDarkMode === 'off')
+                  .height(20)
+                  .onChange((isChecked) => {
+                    if (isChecked) {
+                      this.webDarkMode = 'off';
+                      saveWebDarkMode('off');
+                    }
+                  })
+                Text("关闭")
+                  .fontSize(13)
+                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+                  .margin({ right: 12 })
+
+                Radio({ value: 'app', group: 'web_dark_mode_group' })
+                  .checked(this.webDarkMode === 'app')
+                  .height(20)
+                  .onChange((isChecked) => {
+                    if (isChecked) {
+                      this.webDarkMode = 'app';
+                      saveWebDarkMode('app');
+                    }
+                  })
+                Text("跟随应用")
+                  .fontSize(13)
+                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+              }
+            }
+            .width('100%')
+
+            // UA设置
+            Divider()
+              .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
+              .margin({ top: 12, bottom: 12 })
+
+            Row() {
+              Text("UA")
+                .width('16%')
+                .fontSize(15)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+              Radio({ value: 'Mobile', group: 'ua_type_group' })
+                .checked(this.ua_type === 'Mobile')
+                .onChange((isChecked) => {
+                  if (isChecked) {
+                    this.ua_type = 'Mobile';
+                    saveUserAgentType('Mobile');
+                    this.change_userAgent();
+                    this.refreshWeb();
+                  }
                 })
-                  .height(130)
-                  .textAlign(TextAlign.Start)
-                  .width("80%")
-                  .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#FFFFFF')
-                  .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
-                  .placeholderColor(this.isDarkActive ? '#777777' : '#999999')
-                  .onChange((value) => {
-                    this.c_ua_temp = value;
-                  })
-
-                Text().width(6)
-
-                Button('保存')
-                  .height(34)
-                  .width("18%")
-                  .type(ButtonType.Capsule)
-                  .backgroundColor(this.isDarkActive ? '#FFFFFF' : '#000000')
-                  .fontColor(this.isDarkActive ? '#000000' : '#FFFFFF')
-                  .onClick(() => {
-                    if (this.c_ua_temp) {
-                      this.c_pg_ua = this.c_ua_temp;
-                      saveUserAgent(this.c_pg_ua);
-                      this.change_userAgent()
-                      this.refreshWeb();
-                    }
-                  })
-              }
-              .visibility(this.ua_type == 'custom' ? Visibility.Visible : Visibility.None)
-              .margin({ top: 8 })
-
-              Divider()
-                .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
-                .margin({ top: 12, bottom: 12 })
-
-              // 开关选项组
-              Row() {
-                Text("全屏模式")
-                  .width("50%")
-                  .height(32)
-                  .fontSize(15)
-                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                Toggle({ type: ToggleType.Switch, isOn: this.get_isfull() })
-                  .height(24)
-                  .selectedColor(this.isDarkActive ? '#FFFFFF' : '#000000')
-                  .onChange((isOn: boolean) => {
-                    this.isFull = isOn ? 'true' : 'false';
-                    saveIsfull(this.isFull);
-                    this.setSystemFull(this.isFull, this.isHidestatus, this.isHidebar);
-                  })
-              }
-              .justifyContent(FlexAlign.SpaceBetween)
-              .width('100%')
-
-              Row() {
-                Text("显示状态栏")
-                  .width("50%")
-                  .height(32)
-                  .fontSize(15)
-                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                Toggle({ type: ToggleType.Switch, isOn: this.get_isHideStatus() })
-                  .height(24)
-                  .selectedColor(this.isDarkActive ? '#FFFFFF' : '#000000')
-                  .onChange((isOn: boolean) => {
-                    this.isHidestatus = isOn ? 'true' : 'false';
-                    saveIshidestatus(this.isHidestatus);
-                    this.setSystemFull(this.isFull, this.isHidestatus, this.isHidebar);
-                  })
-              }
-              .justifyContent(FlexAlign.SpaceBetween)
-              .width('100%')
-
-              Row() {
-                Text("显示底部导航条")
-                  .width("50%")
-                  .height(32)
-                  .fontSize(15)
-                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                Toggle({ type: ToggleType.Switch, isOn: this.get_isHideBar() })
-                  .height(24)
-                  .selectedColor(this.isDarkActive ? '#FFFFFF' : '#000000')
-                  .onChange((isOn: boolean) => {
-                    this.isHidebar = isOn ? 'true' : 'false';
-                    saveIshidebar(this.isHidebar);
-                    this.setSystemFull(this.isFull, this.isHidestatus, this.isHidebar);
-                  })
-              }
-              .justifyContent(FlexAlign.SpaceBetween)
-              .width('100%')
-
-              // 下拉灵敏度
-              Row() {
-                Text("下拉灵敏度")
-                  .width("28%")
-                  .height(32)
-                  .fontSize(15)
-                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                Slider({
-                  value: this.slide_num * 100,
-                  step: 10,
-                  min: 10,
-                  style: SliderStyle.InSet
+                .height(20)
+              Text("手机")
+                .fontSize(14)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+                .onClick(() => {
+                  if (this.ua_type == 'custom') {
+                    this.c_ua_temp = this.getuseragentbytype('Mobile');
+                  }
                 })
-                  .width('58%')
-                  .height(25)
-                  .showSteps(true)
-                  .selectedColor(this.isDarkActive ? '#FFFFFF' : '#000000')
-                  .onChange((value: number, mode: SliderChangeMode) => {
-                    this.slide_num = value / 100;
-                    saveSlidenum(value / 100);
-                  })
-                Text((this.slide_num * 100).toFixed(0))
-                  .width('12%')
-                  .height(32)
-                  .fontSize(14)
-                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                  .textAlign(TextAlign.End)
-              }
+
+              Radio({ value: 'PC', group: 'ua_type_group' })
+                .checked(this.ua_type === 'PC')
+                .onChange((isChecked) => {
+                  if (isChecked) {
+                    this.ua_type = 'PC';
+                    saveUserAgentType('PC');
+                    this.change_userAgent();
+                    this.refreshWeb();
+                  }
+                })
+                .height(20)
+              Text("电脑")
+                .fontSize(14)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+                .onClick(() => {
+                  if (this.ua_type == 'custom') {
+                    this.c_ua_temp = this.getuseragentbytype('PC');
+                  }
+                })
+
+              Radio({ value: 'custom', group: 'ua_type_group' })
+                .checked(this.ua_type === 'custom')
+                .onChange((isChecked) => {
+                  if (isChecked) {
+                    this.ua_type = 'custom';
+                    saveUserAgentType('custom');
+                    this.change_userAgent();
+                    this.refreshWeb();
+                  }
+                })
+                .height(20)
+              Text("自定义")
+                .fontSize(14)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+                .onClick(() => {
+                  if (this.ua_type == 'custom') {
+                    this.c_ua_temp = this.getuseragentbytype('custom');
+                  }
+                })
+            }
+            .justifyContent(FlexAlign.SpaceAround)
+            .width('100%')
+
+            Row() {
+              TextArea({
+                text: this.c_ua_temp,
+                placeholder: '请输入UA(可不填)，确认才保存。点击上方[手机][电脑][自定义]文字可将其UA复制到此处。'
+              })
+                .height(130)
+                .textAlign(TextAlign.Start)
+                .width("80%")
+                .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#FFFFFF')
+                .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
+                .placeholderColor(this.isDarkActive ? '#777777' : '#999999')
+                .onChange((value) => {
+                  this.c_ua_temp = value;
+                })
+
+              Text().width(6)
+
+              Button('保存')
+                .height(34)
+                .width("18%")
+                .type(ButtonType.Capsule)
+                .backgroundColor(this.isDarkActive ? '#FFFFFF' : '#000000')
+                .fontColor(this.isDarkActive ? '#000000' : '#FFFFFF')
+                .onClick(() => {
+                  if (this.c_ua_temp) {
+                    this.c_pg_ua = this.c_ua_temp;
+                    saveUserAgent(this.c_pg_ua);
+                    this.change_userAgent();
+                    this.refreshWeb();
+                    this.getUIContext().getPromptAction().showToast({ message: 'UA已更新' });
+                  }
+                })
+            }
+            .visibility(this.ua_type == 'custom' ? Visibility.Visible : Visibility.None)
+            .margin({ top: 8 })
+
+            Divider()
+              .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
+              .margin({ top: 12, bottom: 12 })
+
+            // 开关选项组
+            Row() {
+              Text("全屏模式")
+                .width("50%")
+                .height(32)
+                .fontSize(15)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+              Toggle({ type: ToggleType.Switch, isOn: this.get_isfull() })
+                .height(24)
+                .selectedColor(this.isDarkActive ? '#FFFFFF' : '#000000')
+                .onChange((isOn: boolean) => {
+                  this.isFull = isOn ? 'true' : 'false';
+                  saveIsfull(this.isFull);
+                  this.setSystemFull(this.isFull, this.isHidestatus, this.isHidebar);
+                })
+            }
+            .justifyContent(FlexAlign.SpaceBetween)
+            .width('100%')
+
+            Row() {
+              Text("显示状态栏")
+                .width("50%")
+                .height(32)
+                .fontSize(15)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+              Toggle({ type: ToggleType.Switch, isOn: this.get_isHideStatus() })
+                .height(24)
+                .selectedColor(this.isDarkActive ? '#FFFFFF' : '#000000')
+                .onChange((isOn: boolean) => {
+                  this.isHidestatus = isOn ? 'true' : 'false';
+                  saveIshidestatus(this.isHidestatus);
+                  this.setSystemFull(this.isFull, this.isHidestatus, this.isHidebar);
+                })
+            }
+            .justifyContent(FlexAlign.SpaceBetween)
+            .width('100%')
+
+            Row() {
+              Text("显示底部导航条")
+                .width("50%")
+                .height(32)
+                .fontSize(15)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+              Toggle({ type: ToggleType.Switch, isOn: this.get_isHideBar() })
+                .height(24)
+                .selectedColor(this.isDarkActive ? '#FFFFFF' : '#000000')
+                .onChange((isOn: boolean) => {
+                  this.isHidebar = isOn ? 'true' : 'false';
+                  saveIshidebar(this.isHidebar);
+                  this.setSystemFull(this.isFull, this.isHidestatus, this.isHidebar);
+                })
+            }
+            .justifyContent(FlexAlign.SpaceBetween)
+            .width('100%')
+
+            // 连接诊断信息
+            Divider()
+              .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
+              .margin({ top: 12, bottom: 8 })
+
+            Row() {
+              Text("连接诊断")
+                .fontSize(15)
+                .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
+                .layoutWeight(1)
+              Button('重载')
+                .height(28)
+                .width(56)
+                .type(ButtonType.Capsule)
+                .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#F0F0F0')
+                .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
+                .fontSize(12)
+                .onClick(() => {
+                  this.backToHome();
+                })
+              Text().width(6)
+              Button('探测')
+                .height(28)
+                .width(56)
+                .type(ButtonType.Capsule)
+                .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#F0F0F0')
+                .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
+                .fontSize(12)
+                .onClick(() => {
+                  this.resolveTargetUrl(this.saved_home_url);
+                })
+            }
+            .width('100%')
+
+            Text(`模式: ${this.diagMode}\n目标: ${this.diagTarget}\n解析: ${this.diagResolved}\n指定: ${this.diagChosen}\n探测: ${this.diagProbe}\n最近: ${this.diagLast}`)
               .width('100%')
-              .margin({ top: 4 })
+              .fontSize(12)
+              .lineHeight(18)
+              .fontColor(this.isDarkActive ? '#9A9A9A' : '#666666')
+              .margin({ top: 6 })
+              .textAlign(TextAlign.Start)
 
-              // 连接诊断信息
-              Divider()
-                .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
-                .margin({ top: 12, bottom: 8 })
-
-              Row() {
-                Text("连接诊断")
-                  .fontSize(15)
-                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                  .layoutWeight(1)
-                Button('重载')
-                  .height(28)
-                  .width(56)
-                  .type(ButtonType.Capsule)
-                  .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#F0F0F0')
-                  .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
-                  .fontSize(12)
-                  .onClick(() => {
-                    this.backToHome();
-                  })
-                Text().width(6)
-                Button('探测')
-                  .height(28)
-                  .width(56)
-                  .type(ButtonType.Capsule)
-                  .backgroundColor(this.isDarkActive ? '#2C2C2E' : '#F0F0F0')
-                  .fontColor(this.isDarkActive ? '#FFFFFF' : '#1A1A1A')
-                  .fontSize(12)
-                  .onClick(() => {
-                    this.resolveTargetUrl(this.saved_home_url);
-                  })
-              }
+            Text(this.diagLog)
               .width('100%')
+              .fontSize(11)
+              .lineHeight(16)
+              .fontColor(this.isDarkActive ? '#6E6E6E' : '#999999')
+              .margin({ top: 6 })
+              .textAlign(TextAlign.Start)
 
-              Text(`模式: ${this.diagMode}\n目标: ${this.diagTarget}\n解析: ${this.diagResolved}\n指定: ${this.diagChosen}\n探测: ${this.diagProbe}\n最近: ${this.diagLast}`)
+            Divider()
+              .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
+              .margin({ top: 12, bottom: 8 })
+
+            Row() {
+              Text("Version: 1.1.1")
                 .width('100%')
                 .fontSize(12)
-                .lineHeight(18)
-                .fontColor(this.isDarkActive ? '#9A9A9A' : '#666666')
-                .margin({ top: 6 })
-                .textAlign(TextAlign.Start)
-
-              Text(this.diagLog)
-                .width('100%')
-                .fontSize(11)
-                .lineHeight(16)
-                .fontColor(this.isDarkActive ? '#6E6E6E' : '#999999')
-                .margin({ top: 6 })
-                .textAlign(TextAlign.Start)
-
-              Divider()
-                .color(this.isDarkActive ? '#2A2A2A' : '#E8E8E8')
-                .margin({ top: 12, bottom: 8 })
-
-              Row() {
-                Text("Version: 1.1.1")
-                  .width('100%')
-                  .fontSize(12)
-                  .fontColor(this.isDarkActive ? '#666666' : '#999999')
-                  .textAlign(TextAlign.Center)
-              }
-              .margin({ bottom: 12 })
-
-              Row() {
-                Button('完成')
-                  .type(ButtonType.Capsule)
-                  .backgroundColor(this.isDarkActive ? '#FFFFFF' : '#000000')
-                  .fontColor(this.isDarkActive ? '#000000' : '#FFFFFF')
-                  .onClick(() => {
-                    this.showSetting = false
-                    this.c_ua_temp = this.c_pg_ua;
-                  })
-                  .height(38)
-                  .width(130)
-              }
-              .justifyContent(FlexAlign.Center)
-              .width('100%')
+                .fontColor(this.isDarkActive ? '#666666' : '#999999')
+                .textAlign(TextAlign.Center)
             }
-            .padding({ top: 18, bottom: 18, left: 18, right: 18 })
+            .margin({ bottom: 20 })
           }
-          .scrollable(ScrollDirection.Vertical)
-          .scrollBar(BarState.Auto)
-          .edgeEffect(EdgeEffect.Spring)
+          .padding({ top: 18, bottom: 24, left: 18, right: 18 })
         }
-        .width("90%")
-        .constraintSize({ maxHeight: '82%' })
-        .backgroundColor(this.isDarkActive ? '#121212' : '#FFFFFF')
-        .border({
-          width: 1,
-          color: this.isDarkActive ? '#262626' : '#E8E8E8'
-        })
-        .borderRadius(18)
-        .shadow({
-          radius: 24,
-          color: this.isDarkActive ? '#40000000' : '#20000000',
-          offsetX: 0,
-          offsetY: 8
-        })
+        .layoutWeight(1)
+        .scrollable(ScrollDirection.Vertical)
+        .scrollBar(BarState.Auto)
+        .edgeEffect(EdgeEffect.Spring)
       }
       .width("100%")
       .height("100%")
-      .justifyContent(FlexAlign.Center)
-      .backgroundColor(this.isDarkActive ? '#80000000' : '#40000000')
-      .visibility(this.showSetting ? Visibility.Visible : Visibility.None)
-
+      .backgroundColor(this.isDarkActive ? '#121212' : '#F5F5F7')
     }
-    .height('100%')
+    .hideTitleBar(true)
+  }
+
+  build() {
+    Navigation(this.pathStack) {
+      Stack() {
+        Column() {
+          Web({ src: this.saved_home_url, controller: this.controller })
+            .onControllerAttached(() => {
+              this.controller.setNetworkAvailable(true);
+              this.webDownloadFile.setDownloadDelegate(this.controller);
+              console.info("onControllerAttached");
+              try {
+                this.change_userAgent()
+              } catch (error) {
+                console.error(`ErrorCode: ${(error as BusinessError).code},  Message: ${(error as BusinessError).message}`);
+              }
+            })
+            .onContextMenuShow((event) => {
+              this.result = event.result
+              this.imgUrl = event.param.getSourceUrl();
+              let hitValue = this.controller.getLastHitTest()
+              let img64 = hitValue.extra
+              if (this.imgUrl == '' && img64 != '') {
+                this.imgUrl = img64
+              }
+              let mediaType = event.param.getMediaType()
+              if (mediaType === ContextMenuMediaType.Image) {
+                if (this.imgUrl.startsWith("data:image")) {
+                } else {
+                  if (this.imgUrl != '') {
+                    this.showMenu = true;
+                    this.pic_dl_show = Visibility.Hidden;
+                  }
+                }
+              }
+              return true;
+            })
+            .bindPopup(this.showMenu,
+              {
+                builder: this.MenuBuilder(),
+                enableArrow: false,
+                placement: Placement.LeftTop,
+                offset: { x: this.offsetX, y: this.offsetY },
+                mask: false,
+                onStateChange: (e) => {
+                  if (!e.isVisible) {
+                    this.showMenu = false;
+                  }
+                }
+              })
+            .domStorageAccess(true)
+            .javaScriptAccess(true)
+            .geolocationAccess(true)
+            .imageAccess(true)
+            .onlineImageAccess(true)
+            .fileAccess(true)
+            .mediaPlayGestureAccess(true)
+            .mixedMode(MixedMode.Compatible)
+            .darkMode((this.webDarkMode === 'app' && this.isDarkActive) ? WebDarkMode.On : WebDarkMode.Off)
+            .forceDarkAccess(this.webDarkMode === 'app' && this.isDarkActive)
+            .backgroundColor(this.isDarkActive ? '#000000' : '#FFFFFF')
+            .onSslErrorEventReceive((event) => {
+              // 允许自签名/内网自建证书通过，保证 NAS 局域网访问正常
+              this.diagLast = `[${this.nowStr()}] SSL错误(已放行)`;
+              this.diagEvent('SSL错误，已 handleConfirm 放行');
+              event.handler.handleConfirm();
+            })
+            .onErrorReceive((event) => {
+              let code = event?.error?.getErrorCode();
+              let info = event?.error?.getErrorInfo();
+              this.diagLast = `[${this.nowStr()}] 加载失败 ${code} ${info}`;
+              this.diagEvent(`加载失败 ${code} ${info}`);
+              console.error(`Web error: ${code}, ${info}`);
+            })
+            .onPageEnd((event) => {
+              this.diagLast = `[${this.nowStr()}] 加载完成`;
+              this.diagEvent(`加载完成 ${event?.url ?? ''}`);
+            })
+            .onHttpErrorReceive((event) => {
+              console.error(`HTTP error: ${event?.response?.getResponseCode()}`);
+            })
+        }
+        .width("100%")
+        .height("100%")
+        .backgroundColor(this.isDarkActive ? '#000000' : '#FFFFFF')
+
+        // 悬浮球组件
+        FloatBall({
+          isDark: this.isDarkActive,
+          containerWidth: this.contentW,
+          containerHeight: this.contentH,
+          onOpenSettings: () => {
+            this.pathStack.pushPath({ name: 'settings' });
+          },
+          onRefresh: () => {
+            this.refreshWeb();
+            this.getUIContext().getPromptAction().showToast({ message: '正在刷新' });
+          }
+        })
+      }
+      .width('100%')
+      .height('100%')
+      .onAreaChange((_oldVal: Area, newVal: Area) => {
+        // 实测主页容器尺寸，供悬浮球做边距吸附/收起定位（比窗口 API 可靠）
+        this.contentW = newVal.width as number;
+        this.contentH = newVal.height as number;
+      })
+    }
+    .navDestination(this.PageMap)
+    .hideTitleBar(true)
+    .mode(NavigationMode.Stack)
     .width('100%')
+    .height('100%')
     .backgroundColor(this.isDarkActive ? '#000000' : '#F5F5F7')
   }
 
   onBackPress() {
     try {
+      if (this.pathStack.size() > 0) {
+        this.pathStack.pop();
+        return true;
+      }
       if (this.controller.accessStep(-1)) {
         this.controller.backward();
-        return true
+        return true;
       } else {
-        return false
+        return false;
       }
     } catch (e) {
       console.error('onBackPress error:', JSON.stringify(e));
-      return false
+      return false;
     }
-  }
-
-  onRefreshing() {
-    setTimeout(() => {
-      this.list = Array(20).fill(Date.now());
-      this.refreshing = false;
-
-      if (!this.is_home) {
-        this.refreshWeb();
-        this.is_home = false;
-        this.getUIContext().getPromptAction().showToast({ message: '刷新成功' });
-      }
-    }, 1000);
   }
 
   private refreshWeb() {

@@ -1,14 +1,11 @@
 import { webview } from '@kit.ArkWeb';
-import { promptAction, window, display, prompt } from '@kit.ArkUI';
+import { promptAction, window } from '@kit.ArkUI';
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
-import util from '@ohos.util';
 import {
   saveHomeUrl,
   getHomeUrl,
   saveUserAgent,
   getUserAgent,
-  saveLSRefresh,
-  getLSRefresh,
   saveIshidebar,
   getIshidebar,
   getIshidestatus,
@@ -32,14 +29,6 @@ import { http, connection, socket } from '@kit.NetworkKit';
 import { fileIo as fs, ReadOptions, WriteOptions } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { BusinessError, systemDateTime } from '@kit.BasicServicesKit';
-import { buffer } from '@kit.ArkTS';
-
-enum ScreenOrientation {
-  PORTRAIT = display.Orientation.PORTRAIT,
-  LANDSCAPE = display.Orientation.LANDSCAPE,
-  REVERSE_PORTRAIT = display.Orientation.PORTRAIT_INVERTED,
-  REVERSE_LANDSCAPE = display.Orientation.LANDSCAPE_INVERTED
-}
 
 let context_index = getContext(this) as common.UIAbilityContext;
 let resourceDir = context_index.resourceDir
@@ -89,7 +78,6 @@ async function copyUrlPicToFilesDir(picUrl: string, newFileName: string): Promis
 @Component
 struct Index {
   private isRefreshing: boolean = false;
-  private contextmenu_result: WebContextMenuResult | undefined = undefined;
   @State controller: webview.WebviewController = new webview.WebviewController();
   @State webDownloadFile: IAbstractDownloadHandler = new WebDownloadFileHelper()
   downloadWebLoading: CustomDialogController = new CustomDialogController({
@@ -107,7 +95,6 @@ struct Index {
     buttonType: ButtonType.Capsule
   } // 设置安全控件按钮属性
   private result: WebContextMenuResult | undefined = undefined;
-  @State linkUrl: string = '';
   @State imgUrl: string = '';
   @State offsetX: number = 0;
   @State offsetY: number = 0;
@@ -127,7 +114,6 @@ struct Index {
   @State diagProbe: string = '-';     // TCP 可达性探测结果
   @State diagLast: string = '-';      // 最近一次 Web 加载结果
   @State diagLog: string = '';        // 诊断事件日志(最新在上)
-  private originalTargetHost: string = ''; // 原始主机名
 
   @Builder
   //构建自定义菜单及触发功能接口
@@ -207,40 +193,19 @@ struct Index {
     .visibility(this.pic_dl_show)
   }
 
-  async saveBase64Image(base64Str:string) {
-    try {
-      const context = getContext(this);
-      let helper = photoAccessHelper.getPhotoAccessHelper(context);
-      let uri = await helper.createAsset(photoAccessHelper.PhotoType.IMAGE, 'png')
-      let imageStr = base64Str.split(',')[1];
-      let file = fs.openSync(uri, fs.OpenMode.READ_WRITE);
-      const decodeBuffer = buffer.from(imageStr, 'base64').buffer;
-      fs.writeSync(file.fd, decodeBuffer);
-      fs.closeSync(file);
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
   @State refreshing: boolean = false
   @State list: number[] = Array(20).fill(Date.now())
   @State is_home: boolean = false;
-  @State showDialog: boolean = false;
   @State home_url: string = ''
   @State saved_home_url: string = resourceDir + "/nasnav.html";
   @State c_pg_ua: string = '';
   @State c_ua_temp: string = '';
   @State ua_type: string = 'Mobile';
   @State userAgent: string = '';
-  @State ua_device: string = '';
   @State showTopRow: boolean = false;
   @State showRefreshRow: boolean = true;
   @State showButtonRow: boolean = true;
-  @State refreshTimerId: number | null = null;
   @State showSetting: boolean = false;
-  @State isLandscape: boolean = false;
-  @State isLSRefresh: string = 'false'; //是否横屏不能刷新
-  @State isdrag: number = 1
   @State isHidebar: string = 'false';
   @State isHidestatus: string = 'false';
   @State isFull: string = 'true';
@@ -324,7 +289,6 @@ struct Index {
         this.downloadWebLoading.close()
       }
     })
-    this.isLSRefresh = await getLSRefresh() || this.isLSRefresh;
     this.c_pg_ua = await getUserAgent() || this.c_pg_ua;
     this.c_ua_temp = await getUserAgent() || this.c_pg_ua;
     this.saved_home_url = await getHomeUrl() || this.saved_home_url;
@@ -466,7 +430,6 @@ struct Index {
               })
               .onContextMenuShow((event) => {
                   this.result = event.result
-                  this.linkUrl = event.param.getLinkUrl();
                   this.imgUrl = event.param.getSourceUrl();
                   let hitValue = this.controller.getHitTestValue()
                   let img64 = hitValue.extra
@@ -535,26 +498,9 @@ struct Index {
           .backgroundColor(this.isDarkActive ? '#000000' : '#FFFFFF')
         }
       }
-      .pullDownRatio(this.slide_num * this.isdrag)
+      .pullDownRatio(this.slide_num)
       .backgroundColor(this.isDarkActive ? '#000000' : '#F5F5F7')
       .onRefreshing(() => this.onRefreshing())
-      .onSizeChange(() => {
-        window.getLastWindow(this.getUIContext().getHostContext(), (err, win) => {
-          let cutOutInfo = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM_GESTURE)
-          if (window.Orientation.AUTO_ROTATION) {
-            let rotation: number = display.getDefaultDisplaySync().orientation
-            if (this.isLSRefresh == 'true') {
-              if (rotation == 0 || rotation == 2) {
-                this.isLandscape = false;
-                this.isdrag = 1;
-              } else {
-                this.isLandscape = true;
-                this.isdrag = 0;
-              }
-            }
-          }
-        })
-      })
       .width('100%')
       .height('100%')
 
@@ -825,30 +771,6 @@ struct Index {
 
               // 开关选项组
               Row() {
-                Text("横屏禁止刷新")
-                  .width("50%")
-                  .height(32)
-                  .fontSize(15)
-                  .fontColor(this.isDarkActive ? '#E5E5EA' : '#1A1A1A')
-                Toggle({ type: ToggleType.Switch, isOn: this.get_isLSRefresh() })
-                  .height(24)
-                  .selectedColor(this.isDarkActive ? '#FFFFFF' : '#000000')
-                  .onChange((isOn: boolean) => {
-                    if (isOn) {
-                      this.isLSRefresh = 'true';
-                      saveLSRefresh(this.isLSRefresh);
-                      this.isdrag = this.isLandscape ? 0 : 1;
-                    } else {
-                      this.isLSRefresh = 'false';
-                      saveLSRefresh(this.isLSRefresh);
-                      this.isdrag = 1;
-                    }
-                  })
-              }
-              .justifyContent(FlexAlign.SpaceBetween)
-              .width('100%')
-
-              Row() {
                 Text("全屏模式")
                   .width("50%")
                   .height(32)
@@ -1054,7 +976,7 @@ struct Index {
   }
 
   onRefreshing() {
-    this.refreshTimerId = setTimeout(() => {
+    setTimeout(() => {
       this.list = Array(20).fill(Date.now());
       this.refreshing = false;
 
@@ -1066,13 +988,6 @@ struct Index {
     }, 1000);
   }
 
-  private clearRefreshTimer() {
-    if (this.refreshTimerId !== null) {
-      clearTimeout(this.refreshTimerId);
-      this.refreshTimerId = null;
-    }
-  }
-
   private refreshWeb() {
     if (this.isRefreshing) {
       return;
@@ -1082,13 +997,6 @@ struct Index {
     setTimeout(() => {
       this.isRefreshing = false;
     }, 1000);
-  }
-
-  private cancelRefresh() {
-    this.clearRefreshTimer();
-    this.isRefreshing = true;
-    this.refreshing = true;
-    this.controller.stop();
   }
 
   private nowStr(): string {
@@ -1288,10 +1196,6 @@ struct Index {
     console.info(`[IPResolve] backToHome triggered, saved_home_url=${this.saved_home_url}`);
     let finalUrl = await this.resolveTargetUrl(this.saved_home_url);
     this.controller.loadUrl(finalUrl);
-  }
-
-  get_isLSRefresh() {
-    return this.isLSRefresh == 'true';
   }
 
   get_isHideBar() {

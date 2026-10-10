@@ -16,7 +16,6 @@ export abstract class IAbstractDownloadHandler {
   protected webDownloadItem: webview.WebDownloadItem | null = null
   protected downloadProgress: number = 0
   protected controller: webview.WebviewController | null = null
-  protected isCustomPath: boolean = false
 
   /**
    * 设置下载委托
@@ -29,27 +28,6 @@ export abstract class IAbstractDownloadHandler {
       this.controller = controller
       this.controller.setDownloadDelegate(this.webDownloadDelegate)
       this.setupDelegateCallbacks(this.webDownloadDelegate)
-    } catch (error) {
-      this.handleError(error as BusinessError)
-    }
-  }
-
-  /**
-   * 启动文件下载
-   * @param customPath 自定义存储路径（需包含文件名）
-   */
-  startDownload(customPath?: string) {
-    if (!this.webDownloadItem) {
-      throw new Error('DOWNLOAD_NOT_INITIALIZED')
-    }
-
-    try {
-      const effectivePath = this.validatePath(customPath)
-      this.prepareDirectory(effectivePath)
-
-      this.webDownloadItem!.start(effectivePath)
-      this.downloadProgress = 0
-      this.isCustomPath = !!customPath
     } catch (error) {
       this.handleError(error as BusinessError)
     }
@@ -120,16 +98,6 @@ export abstract class IAbstractDownloadHandler {
   }
 
   /**
-   * 路径验证与处理
-   */
-  private validatePath(customPath?: string): string {
-    if (customPath) {
-      return this.ensureFileExtension(customPath)
-    }
-    return this.generateDefaultPath()
-  }
-
-  /**
    * 生成默认下载路径
    */
   private generateDefaultPath(): string {
@@ -138,17 +106,6 @@ export abstract class IAbstractDownloadHandler {
     const fileName = this.webDownloadItem?.getSuggestedFileName()
       || `download_${Date.now()}.bin`
     return `${defaultDir}${fileName}`
-  }
-
-  /**
-   * 确保文件扩展名正确
-   */
-  private ensureFileExtension(path: string): string {
-    const suggestedName = this.webDownloadItem?.getSuggestedFileName() || ''
-    const expectedExt = suggestedName.split('.').pop() || ''
-    const currentExt = path.split('.').pop() || ''
-
-    return currentExt === expectedExt ? path : `${path}.${expectedExt}`
   }
 
   /**
@@ -183,12 +140,10 @@ export abstract class IAbstractDownloadHandler {
     delegate.onDownloadFinish(async (item: webview.WebDownloadItem) => {
       try {
         const filePath = item.getFullPath()
-        if (!this.isCustomPath) {
-          await this.saveFile(filePath) // 仅非自定义路径需要另存操作
-        }
+        await this.saveFile(filePath) // 下载完成后另存到用户选择的位置
         this.handleDownloadSuccess()
       } catch (error) {
-        this.handleDownloadFailure(this.isCustomPath ? '文件下载失败' : '文件保存失败')
+        this.handleDownloadFailure('文件保存失败')
       }
     })
   }

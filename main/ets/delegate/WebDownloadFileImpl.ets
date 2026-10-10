@@ -17,13 +17,6 @@ export class WebDownloadFileHelper extends IAbstractDownloadHandler {
   private static _downloadProgress: number = 0
 
   /**
-   * 单例访问入口
-   * */
-  static getInstance(): WebDownloadFileHelper {
-    return WebDownloadFileHelper.instance
-  }
-
-  /**
    * 静态下载启动方法
    * */
   static startDownload(customPath?: string) {

@@ -42,17 +42,6 @@ export async function getUserAgentType(): Promise<string> {
   return String(await store.get('userAgent_type', ''));
 }
 
-export async function saveLSRefresh(LSRefresh: string) {
-  const store = await getPreferences();
-  await store.put('is_lsr', LSRefresh);
-  await store.flush(); // 刷新保存
-}
-
-export async function getLSRefresh(): Promise<string> {
-  const store = await getPreferences();
-  return String(await store.get('is_lsr', ''));
-}
-
 export async function saveIshidebar(ishidebar: string) {
   const store = await getPreferences();
   await store.put('is_hidebar', ishidebar);
